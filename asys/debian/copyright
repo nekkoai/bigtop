@@ -1,0 +1,15 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: asys
+Source: https://github.com/glguida/asys
+
+Files: *
+Copyright: Gianluca Guida
+License: see LICENSE
+ See /usr/share/asys/LICENSE and LICENSE.multiagent (installed from upstream).
+
+Files: hostdeps/* hostdeps-human/* asys-inference/vendor/*
+Copyright: respective upstream authors (ruamel.yaml, textual, rich, markdown-it-py,
+ mdit-py-plugins, linkify-it-py, mdurl, platformdirs, pygments,
+ typing-extensions; vendored Go modules)
+License: MIT and BSD-2-Clause and PSF-2.0
+ See the *.dist-info/LICENSE* files and the vendored module LICENSE files.

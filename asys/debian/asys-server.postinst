@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+. /etc/asys/server.conf
+case "$1" in
+    configure)
+        getent group "$ASYS_GROUP" >/dev/null || addgroup --quiet --system "$ASYS_GROUP"
+        if ! getent passwd "$ASYS_USER" >/dev/null; then
+            adduser --quiet --system --ingroup "$ASYS_GROUP" --home "$ASYS_HOME" --no-create-home \
+                --shell /usr/sbin/nologin --gecos "asys shared instance" "$ASYS_USER"
+        fi
+        # The service user refreshes shared services (containers) on upgrade.
+        getent group docker >/dev/null && adduser --quiet "$ASYS_USER" docker || true
+        if [ -n "${2:-}" ]; then
+            asys-server-update --update
+        else
+            asys-server-update
+            cat <<MSG
+asys-server: shared instance ready under $ASYS_HOME.
+  Grant access:      asys-adduser USER...
+  Use it:            source $ASYS_HOME/asys-env
+  Inference (once):  asys-inference gateway login PROVIDER --as ACCOUNT && asys-inference start
+  Check:             asys version
+MSG
+        fi
+        ;;
+esac
+#DEBHELPER#

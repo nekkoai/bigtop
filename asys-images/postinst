@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+case "$1" in
+    configure)
+        if docker info >/dev/null 2>&1; then
+            asys-images-load --quiet
+        else
+            echo "asys-images: Docker is not running; run 'asys-images-load' once it is." >&2
+        fi
+        ;;
+esac

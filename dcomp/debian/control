@@ -1,0 +1,16 @@
+Source: dcomp
+Section: admin
+Priority: optional
+Maintainer: Roman <roman@nekko.ai>
+Build-Depends: debhelper-compat (= 13), golang-1.25-go | golang-go (>= 2:1.25~)
+Standards-Version: 4.6.2
+Homepage: https://github.com/glguida/dcomp
+Rules-Requires-Root: no
+
+Package: dcomp
+Architecture: any
+Depends: ${misc:Depends}, docker.io | docker-ce
+Description: declarative container composition engine used by asys
+ dcomp runs systems of Docker components wired through Unix-socket
+ channels, with per-state-root namespaces and optional group-shared
+ state. Ships dcomp, dcomp-proxy and dcomp-healthcheck.

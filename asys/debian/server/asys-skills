@@ -1,0 +1,29 @@
+#!/bin/sh
+# Copy the asys operating and authoring skills where coding agents look for them.
+set -eu
+usage() {
+    cat <<MSG
+usage: asys-skills [--force] [--codex] [--claude] [DIR...]
+Export the bundled asys skills (asys, asys-authoring) into agent skill
+directories: --codex -> ~/.codex/skills, --claude -> ~/.claude/skills, or any
+DIR. --force replaces existing copies (after an asys upgrade).
+Without arguments, print where the bundled skills live.
+MSG
+}
+force=0; set -- "$@"; dests=""
+for arg; do
+    case "$arg" in
+        --force) force=1 ;;
+        --codex) dests="$dests $HOME/.codex/skills" ;;
+        --claude) dests="$dests $HOME/.claude/skills" ;;
+        -h|--help) usage; exit 0 ;;
+        -*) usage >&2; exit 2 ;;
+        *) dests="$dests $arg" ;;
+    esac
+done
+[ -n "$dests" ] || { asys skill; exit 0; }
+for dest in $dests; do
+    mkdir -p "$dest"
+    if [ $force = 1 ]; then rm -rf "$dest/asys" "$dest/asys-authoring"; fi
+    asys skill "$dest"
+done

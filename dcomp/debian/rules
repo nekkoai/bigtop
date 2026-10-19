@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+export CGO_ENABLED=0
+export GOFLAGS=-mod=vendor -trimpath -buildvcs=false
+export GOPROXY=off
+export GOCACHE=$(CURDIR)/debian/.gocache
+export GOTOOLCHAIN=local
+GO := $(firstword $(wildcard /usr/lib/go-1.25/bin/go) $(shell command -v go))
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) build GO=$(GO)
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/dcomp PREFIX=/usr
+
+override_dh_dwz:
+
+override_dh_auto_clean:
+	rm -rf bin debian/.gocache

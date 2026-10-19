@@ -1,0 +1,5 @@
+dcomp (0.3.2-1) noble; urgency=medium
+
+  * Initial packaging of upstream v0.3.2.
+
+ -- Roman <roman@nekko.ai>  Wed, 30 Sep 2026 16:29:40 +0000

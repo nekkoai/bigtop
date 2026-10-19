@@ -1,0 +1,21 @@
+[Unit]
+Description=asys dashboard for the shared /srv/asys instance
+Documentation=file:/usr/share/doc/asys/README.md
+After=network.target
+
+[Service]
+Type=simple
+User=asys
+Group=asys
+EnvironmentFile=/etc/asys/server.conf
+ExecStart=/usr/bin/asys dashboard --root ${ASYS_STATE_ROOT} --port ${ASYS_DASHBOARD_PORT} $ASYS_DASHBOARD_ARGS
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/asys
+
+[Install]
+WantedBy=multi-user.target

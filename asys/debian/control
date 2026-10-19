@@ -1,0 +1,44 @@
+Source: asys
+Section: devel
+Priority: optional
+Maintainer: Roman <roman@nekko.ai>
+Build-Depends: debhelper-compat (= 13), dh-python, python3, golang-1.25-go | golang-go (>= 2:1.25~),
+ pkg-config, libxaw7-dev, libxmu-dev, libxt-dev, libxft-dev, libxrender-dev, libfontconfig-dev, libx11-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/glguida/asys
+Rules-Requires-Root: no
+
+Package: asys
+Architecture: any
+Depends: ${misc:Depends}, ${python3:Depends}, python3 (>= 3.10), dcomp (>= 0.3.2),
+ asys-images (>= ${source:Upstream-Version}), asys-images (<< ${source:Upstream-Version}+),
+ docker.io | docker-ce
+Recommends: git, docker-buildx | docker-buildx-plugin
+Suggests: asys-flow-view
+Description: agent execution environment with logged runs and shared inference
+ asys runs LLM agents, goals, BPMN/YAML workflows, programs and human requests
+ in Docker environments through dcomp, recording every job. This package
+ installs the host commands (asys, asys-run, asys-workers, asys-environment,
+ asys-inference, asys-human-prompt), the bundled operating and authoring
+ skills, dashboard designs, system agents and examples. The matching
+ container images and release record come from asys-images.
+
+Package: asys-flow-view
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: asys (= ${binary:Version})
+Description: X11 workflow viewer and editor for asys
+ asys-flow-view draws asys workflow files as a map, edits them, follows runs
+ and starts them. It talks to "asys workflow serve" and needs only the
+ libraries every X11 system has (Xt, Xaw, Xmu, Xft, XRender, fontconfig).
+
+Package: asys-server
+Architecture: all
+Depends: ${misc:Depends}, asys (>= ${source:Version}), adduser, python3
+Recommends: nginx
+Description: shared team deployment of asys under /srv/asys
+ Creates the asys group and service user, initializes group-shared asys
+ state under /srv/asys/host (dcomp state inside it, as upstream documents),
+ runs the dashboard as a system service, and provides asys-adduser,
+ asys-skills and asys-server-update helpers. On upgrade it refreshes
+ running shared services with "asys update" when no run is active.

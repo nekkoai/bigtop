@@ -1,0 +1,21 @@
+#!/bin/sh
+# Grant users access to the shared asys instance.
+set -eu
+. /etc/asys/server.conf
+[ $# -gt 0 ] || { echo "usage: asys-adduser USER..." >&2; exit 2; }
+groups="$ASYS_GROUP"
+# dcomp needs the local Docker socket; the docker group grants it.
+getent group docker >/dev/null && groups="$groups,docker"
+for user; do
+    id "$user" >/dev/null
+    usermod -aG "$groups" "$user"
+    echo "$user: added to $groups"
+done
+cat <<MSG
+Members must log in again for the new groups to apply. Then, in each shell:
+    source $ASYS_HOME/asys-env
+Then 'asys version' shows the installed release and its services.
+Git refuses checkouts owned by another member ("dubious ownership"); for a
+shared checkout under $ASYS_HOME/workspaces each member runs once:
+    git config --global --add safe.directory $ASYS_HOME/workspaces/NAME
+MSG

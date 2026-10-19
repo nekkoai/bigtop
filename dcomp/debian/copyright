@@ -1,0 +1,13 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: dcomp
+Source: https://github.com/glguida/dcomp
+
+Files: *
+Copyright: Gianluca Guida
+License: see LICENSE
+ See /usr/share/doc/dcomp/LICENSE (installed from upstream).
+
+Files: vendor/*
+Copyright: respective Go module authors
+License: various
+ Vendored Go modules; see the LICENSE files inside each module directory.

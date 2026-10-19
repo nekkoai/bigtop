@@ -1,0 +1,48 @@
+asys (0.2.2-3) noble; urgency=medium
+
+  * asys-images: regenerate release.json with the local engine's image IDs on
+    load; IDs differ between Docker's graphdriver and containerd image stores.
+
+ -- Roman <roman@nekko.ai>  Mon, 19 Oct 2026 20:55:49 +0000
+
+asys (0.2.2-2) noble; urgency=medium
+
+  * Recommend rather than depend on docker-buildx: docker-ce hosts may carry
+    buildx outside apt; asys-images-load warns when it is missing.
+
+ -- Roman <roman@nekko.ai>  Mon, 19 Oct 2026 20:41:18 +0000
+
+asys (0.2.2-1) noble; urgency=medium
+
+  * New upstream release 0.2.2 (release identity, workflow files, asys version,
+    update draining, dashboard --allow-host upstream).
+  * Drop the dashboard --allow-host patch (upstream).
+  * Ship release.json with asys-images; one build ID for binaries and images.
+  * Depend on docker-buildx (bare FROM asys-workers needs BuildKit contexts).
+  * New binary package asys-flow-view (X11 viewer/editor).
+  * asys-server: state under /srv/asys/host as upstream documents; the
+    upgrade hook skips asys update while runs are active.
+
+ -- Roman <roman@nekko.ai>  Mon, 19 Oct 2026 20:16:07 +0000
+
+asys (0.2.0-3) noble; urgency=medium
+
+  * Publish releases as a flat signed apt repository on GitHub Releases.
+  * Drop the "~noble1" version suffix (GitHub rewrites "~" in asset names).
+
+ -- Roman <roman@nekko.ai>  Wed, 30 Sep 2026 17:31:28 +0000
+
+asys (0.2.0-2) noble; urgency=medium
+
+  * asys: depend on asys-images by upstream version, so Debian revisions
+    of asys do not force an image rebuild.
+
+ -- Roman <roman@nekko.ai>  Wed, 30 Sep 2026 16:39:59 +0000
+
+asys (0.2.0-1) noble; urgency=medium
+
+  * Initial packaging of upstream 0.2.0.
+  * Patch: dashboard --allow-host for reverse-proxied deployments.
+  * asys-server: shared /srv/asys team deployment.
+
+ -- Roman <roman@nekko.ai>  Wed, 30 Sep 2026 16:32:12 +0000

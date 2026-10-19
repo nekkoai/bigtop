@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    env:
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: |
+            upstream/dcomp/go.sum
+            upstream/asys/asys-inference/go.sum
+
+      - name: Build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            debhelper dh-python devscripts fakeroot python3-pip zstd apt-utils gnupg \
+            pkg-config libxaw7-dev libxmu-dev libxt-dev libxft-dev libxrender-dev libfontconfig-dev libx11-dev
+
+      - name: Build packages
+        run: ci/build-all.sh
+
+      - name: Smoke test (install + team workflow as a second user)
+        run: sudo ci/smoke-test.sh build/dist
+
+      - name: Import apt signing key
+        if: env.APT_GPG_PRIVATE_KEY != ''
+        run: printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+
+      - name: Generate apt repository metadata
+        run: ci/make-apt-repo.sh build/dist
+
+      - name: Verify the apt repository installs
+        run: sudo ci/apt-repo-test.sh build/dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apt-repo
+          path: build/dist/*
+          if-no-files-found: error
+
+      # Every file in build/dist becomes a release asset, so
+      # https://github.com/OWNER/REPO/releases/latest/download/ is a flat apt repository.
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Flat apt repository (Ubuntu 24.04, amd64):
+            ```sh
+            sudo curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/asys-archive-keyring.gpg -o /usr/share/keyrings/asys-archive-keyring.gpg
+            sudo curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/asys.sources -o /etc/apt/sources.list.d/asys.sources
+            sudo apt update && sudo apt install asys-server
+            ```

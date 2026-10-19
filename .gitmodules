@@ -1,0 +1,6 @@
+[submodule "upstream/dcomp"]
+	path = upstream/dcomp
+	url = https://github.com/glguida/dcomp
+[submodule "upstream/asys"]
+	path = upstream/asys
+	url = https://github.com/glguida/asys

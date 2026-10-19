@@ -1,0 +1,54 @@
+#!/bin/sh
+# Load the packaged asys images into the local Docker Engine and write the
+# release record the asys commands read (/usr/share/asys/release.json).
+# usage: asys-images-load [--prune] [--quiet]
+#
+# The record is regenerated here rather than shipped as-is because Docker's
+# image IDs are not portable: the classic graphdriver reports the config
+# digest, the containerd image store the manifest digest. Tags survive
+# docker save/load; IDs are re-read from this engine.
+set -eu
+archive=/usr/share/asys/images/asys-images.tar.zst
+template=/usr/share/asys/images/release.json
+record=/usr/share/asys/release.json
+prune=0; quiet=0
+for arg; do case "$arg" in --prune) prune=1;; --quiet) quiet=1;; *) echo "usage: asys-images-load [--prune] [--quiet]" >&2; exit 2;; esac; done
+say() { [ $quiet = 1 ] || echo "$@"; }
+if ! docker info >/dev/null 2>&1; then
+    echo "asys-images-load: Docker is not available to $(id -un); run this again as a Docker user" >&2
+    exit 1
+fi
+# Environment images build FROM bare asys base names, resolved through BuildKit
+# build contexts; the classic builder cannot do that.
+docker buildx version >/dev/null 2>&1 || \
+    echo "asys-images-load: WARNING: docker buildx is missing; install docker-buildx (or Docker's docker-buildx-plugin) before running environments" >&2
+say "Loading asys images from $archive…"
+zstd -dc "$archive" | docker load -q >/dev/null
+python3 - "$template" "$record" "$quiet" <<'PY'
+import json, os, subprocess, sys, tempfile
+template, record, quiet = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+release = json.load(open(template))
+missing = 0
+for name, entry in sorted(release["images"].items()):
+    actual = subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", entry["ref"]],
+                            capture_output=True, text=True).stdout.strip()
+    if actual:
+        entry["id"] = actual
+    else:
+        missing += 1
+    if not quiet:
+        print(f"  {entry['ref']}  {'ok' if actual else 'MISSING'}")
+if missing:
+    sys.exit(f"asys-images-load: {missing} image(s) failed to load; {record} left unchanged")
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(record), prefix=".release.")
+with os.fdopen(fd, "w") as out:
+    json.dump(release, out, indent=2)
+    out.write("\n")
+os.chmod(tmp, 0o644)
+os.replace(tmp, record)
+PY
+say "Release record written to $record (build $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build"])' "$record"))"
+if [ $prune = 1 ]; then
+    say "Removing unreferenced older asys images…"
+    docker images --filter dangling=true --format '{{.ID}}' | xargs -r docker rmi >/dev/null 2>&1 || true
+fi

@@ -1,0 +1,48 @@
+#!/bin/sh
+# (Re)initialize the shared instance and, with --update, refresh its running
+# shared services. Run by asys-server's postinst; safe to rerun by hand as root.
+set -eu
+. /etc/asys/server.conf
+as_service() { runuser -u "$ASYS_USER" -- env BUILDKIT_PROGRESS=plain "$@"; }
+
+install -d -m 2775 -o root -g "$ASYS_GROUP" "$ASYS_HOME"
+install -d -m 2770 -o "$ASYS_USER" -g "$ASYS_GROUP" "$ASYS_HOME/workspaces"
+if [ ! -e "$ASYS_STATE_ROOT" ] && [ -e "$ASYS_HOME/state/asys-env" ]; then
+    cat >&2 <<MSG
+asys-server: found state from asys-server < 0.2.2 in $ASYS_HOME/state (dcomp in $ASYS_HOME/dcomp).
+The package now uses $ASYS_STATE_ROOT with dcomp state inside it. Either keep the old
+layout by setting ASYS_STATE_ROOT=$ASYS_HOME/state in /etc/asys/server.conf, or migrate:
+  asys-inference --root $ASYS_HOME/state stop; dcomp --state-root $ASYS_HOME/dcomp down asys
+  mv $ASYS_HOME/state $ASYS_STATE_ROOT && mv $ASYS_HOME/dcomp $ASYS_STATE_ROOT/dcomp
+  rm -f $ASYS_STATE_ROOT/inference/machine.json   # re-run asys-inference init, log in again
+  asys-server-update
+MSG
+    exit 0
+fi
+as_service asys init "$ASYS_STATE_ROOT" --group "$ASYS_GROUP" >/dev/null
+ln -sfn "${ASYS_STATE_ROOT#$ASYS_HOME/}/asys-env" "$ASYS_HOME/asys-env"
+if [ ! -f "$ASYS_STATE_ROOT/inference/machine.json" ]; then
+    # asys init put dcomp state inside the asys state; point inference at it
+    # explicitly (without DCOMP_STATE_ROOT it would use the service user's home).
+    as_service asys-inference --root "$ASYS_STATE_ROOT" init --dcomp-state-root "$ASYS_STATE_ROOT/dcomp" >/dev/null || \
+        echo "asys-server: inference init skipped (run 'asys-inference init' later)" >&2
+fi
+[ "${1:-}" = --update ] || exit 0
+if ! docker info >/dev/null 2>&1; then
+    echo "asys-server: Docker unavailable; run 'asys-server-update --update' later to refresh shared services" >&2
+    exit 0
+fi
+# asys update drains active runs before replacing services, which can take as
+# long as those runs; never do that from a package upgrade.
+active=$(as_service asys --root "$ASYS_STATE_ROOT" ps --json 2>/dev/null \
+    | python3 -c 'import json,sys; print(sum(1 for r in json.load(sys.stdin) if r.get("status") == "running"))' 2>/dev/null || echo 0)
+if [ "$active" != 0 ]; then
+    cat >&2 <<MSG
+asys-server: $active run(s) active; shared services keep their current build.
+When convenient run:  sudo asys-server-update --update   (drains those runs first)
+or upgrade single workflows with:  asys-run --upgrade RUN
+MSG
+    exit 0
+fi
+as_service asys --root "$ASYS_STATE_ROOT" update || \
+    echo "asys-server: 'asys update' failed; rerun 'asys-server-update --update'" >&2

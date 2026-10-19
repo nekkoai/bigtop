@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+#DEBHELPER#
+if [ "$1" = purge ]; then
+    echo "asys-server: /srv/asys (state, runs, workspaces) and the asys group/user were left in place." >&2
+fi

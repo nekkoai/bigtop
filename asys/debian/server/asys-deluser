@@ -1,0 +1,8 @@
+#!/bin/sh
+# Remove users from the asys group (docker membership is left unchanged).
+set -eu
+. /etc/asys/server.conf
+[ $# -gt 0 ] || { echo "usage: asys-deluser USER..." >&2; exit 2; }
+for user; do
+    gpasswd -d "$user" "$ASYS_GROUP"
+done
