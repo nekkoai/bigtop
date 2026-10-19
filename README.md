@@ -22,8 +22,9 @@ Historical asys design notes: [PLAN.md](PLAN.md).
 
 ```
 pkg/
-  asys/debian/                 source packaging: asys, asys-server, asys-flow-view
-  asys-images/debian/          image bundle's control template, hooks and loader
+  asys/
+    debian/                   source packaging: asys, asys-server, asys-flow-view
+    images/debian/             asys-images control template, hooks and loader
   dcomp/debian/                source packaging: dcomp
 upstream/asys, upstream/dcomp  pinned upstream releases (submodules)
 keys/                         apt repository signing public key
@@ -32,15 +33,17 @@ tests/                        lightweight packaging-path regression tests
 .github/workflows/build.yml   build -> smoke test -> apt metadata -> release on tag
 ```
 
-`pkg/<name>/` is a **packaging unit**, not necessarily one binary package.
+`pkg/<project>/` groups packaging for one **software project**, not necessarily
+one binary package. Companion artifacts live beneath their owning project.
 Keep related binary packages produced by one source build together; do not
 split `asys-server` and `asys-flow-view` out of `pkg/asys/debian`.
-Format-specific recipes live below the unit (`debian/` today; other formats
-can be added later).
+Format-specific recipes live below the project or companion artifact
+(`debian/` today; other formats can be added later).
 
-`asys-images` is a separate unit because it has a distinct Docker build/save
-pipeline. Its `debian/` directory is input to `ci/build-images.sh` and
-`dpkg-deb`, **not** a standalone debhelper source package. It deliberately
+`asys-images` is a companion artifact under `pkg/asys/images/`, with a distinct
+Docker build/save pipeline. Its `debian/` directory is input to
+`ci/build-images.sh` and `dpkg-deb`, **not** a standalone debhelper source
+package. It deliberately
 shares `upstream/asys` and reads its version from
 `pkg/asys/debian/changelog`; it must not acquire a separate version or source
 pin. The Dockerfiles remain upstream, while the image-bundle packaging lives

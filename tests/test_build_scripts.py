@@ -101,11 +101,11 @@ class BuildScriptsTest(unittest.TestCase):
         self.assertEqual(json.loads((extract / "usr/share/asys/images/release.json").read_text()), release)
         self.assertEqual(subprocess.check_output(["zstd", "-dc", extract / "usr/share/asys/images/asys-images.tar.zst"]), b"image archive\n")
         loader = extract / "usr/sbin/asys-images-load"
-        self.assertEqual(loader.read_bytes(), (ROOT / "pkg/asys-images/debian/asys-images-load").read_bytes())
+        self.assertEqual(loader.read_bytes(), (ROOT / "pkg/asys/images/debian/asys-images-load").read_bytes())
         self.assertTrue(loader.stat().st_mode & 0o111)
         for name in ("postinst", "postrm"):
             script = control / name
-            self.assertEqual(script.read_bytes(), (ROOT / "pkg/asys-images/debian" / name).read_bytes())
+            self.assertEqual(script.read_bytes(), (ROOT / "pkg/asys/images/debian" / name).read_bytes())
             self.assertTrue(script.stat().st_mode & 0o111)
         self.assertEqual(make_log.read_text().strip(), "build ASYS_BUILD=" + build)
         self.assertEqual(docker_log.read_text().split(), [entry["ref"] for entry in release["images"].values()])
