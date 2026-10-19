@@ -8,7 +8,7 @@ can be added without introducing another packaging repository.
 
 Upstream sources are pinned as git submodules under `upstream/`; GitHub
 Actions builds, smoke-tests and (on `v*` tags) releases the `.deb`s.
-Historical asys design notes: [PLAN.md](PLAN.md).
+Contributor and agent guidance: [AGENTS.md](AGENTS.md).
 
 | Package | Built by | Contents |
 |---|---|---|
@@ -24,7 +24,7 @@ Historical asys design notes: [PLAN.md](PLAN.md).
 pkg/
   asys/
     debian/                   source packaging: asys, asys-server, asys-flow-view
-    images/debian/             asys-images control template, hooks and loader
+    images/debian/            asys-images control template, hooks and loader
   dcomp/debian/                source packaging: dcomp
 upstream/asys, upstream/dcomp  pinned upstream releases (submodules)
 keys/                         apt repository signing public key
@@ -43,8 +43,7 @@ Format-specific recipes live below the project or companion artifact
 `asys-images` is a companion artifact under `pkg/asys/images/`, with a distinct
 Docker build/save pipeline. Its `debian/` directory is input to
 `ci/build-images.sh` and `dpkg-deb`, **not** a standalone debhelper source
-package. It deliberately
-shares `upstream/asys` and reads its version from
+package. It deliberately shares `upstream/asys` and reads its version from
 `pkg/asys/debian/changelog`; it must not acquire a separate version or source
 pin. The Dockerfiles remain upstream, while the image-bundle packaging lives
 here.
@@ -55,24 +54,53 @@ recipes can live under `deploy/<product>/` when needed; install-time service
 units and hooks stay with the packages that ship them. No placeholder
 packages or deployment framework are introduced in this first migration.
 
+## Packaging principles
+
+- **Keep upstream code upstream.** This repository owns packaging, deployment
+  integration and release orchestration. Pin upstream sources rather than
+  copying application implementations into `pkg/`.
+- **Build related artifacts together.** The asys host packages and image bundle
+  must use the same source revision, package version and upstream build ID
+  (`tools/build-id`). Use one `ci/build-all.sh` run for a release set; matching
+  version strings alone do not prove that separately built images match.
+- **Resolve image identity on the target engine.** The image bundle includes a
+  build-host release record. `asys-images-load` loads the images and regenerates
+  `/usr/share/asys/release.json` with their local Docker IDs; those IDs are not
+  portable between Docker image stores.
+- **Vendor host dependencies at build time.** The build scripts vendor Go
+  modules and private host Python dependencies into the prepared source tree.
+  Package installation uses those bundled files, not pip/npm installs into host
+  system directories. Container builds have separate network requirements.
+- **Preserve installed state and active work.** Keep host tooling separate from
+  `asys-server`'s user/group, service and shared-state setup. Maintainer scripts
+  should be idempotent, retain user data and defer shared-service updates while
+  runs are active. Do not automatically prune images used by running work.
+
 ## Build locally
+
+Run full builds in a disposable Ubuntu 24.04 builder with its **own Docker
+daemon**: builds can replace existing image tags, even without installing a
+package. Installation and apt tests additionally create users, start services
+and modify apt configuration; do not run them on a working deployment.
 
 ```sh
 git clone --recursive https://github.com/gh-ainekko/bigtop.git
 cd bigtop
 ci/build-all.sh                 # -> build/dist/*.deb
-sudo ci/smoke-test.sh           # installs them and runs the team workflow as user "smoke"
 ```
 
 Needs Go ≥ 1.25 on PATH, `debhelper`, `dh-python`, `devscripts`, `fakeroot`,
 `python3-pip`, `zstd`, the X11 dev packages from `pkg/asys/debian/control`, Docker
-with buildx. `asys` and `asys-images` carry the same upstream **build ID**
-(`tools/build-id`, e.g. `0.2.2-7fd29b7`): the `asys` commands only use images
-named in `/usr/share/asys/release.json`, which `asys-images` ships together with
-those exact images, so the two must come from one `ci/build-all.sh` run. The scripts default to the submodules; pass
-another checkout and revision to build something else
-(`ci/build-asys.sh ~/asys HEAD`). Package versions come from
+with buildx. See `.github/workflows/build.yml` for the CI toolchain and dependency
+installation commands. The current scripts invoke `dpkg-buildpackage` and
+`dpkg-deb` directly; they do not provision an `sbuild` chroot.
+
+Scripts default to the pinned submodules; pass another checkout and revision
+to build something else (`ci/build-asys.sh ~/asys HEAD`). Keep the image build
+on the same revision when using these overrides. Package versions come from
 `pkg/*/debian/changelog` (`dch -i`); image tags use the upstream build ID.
+
+## Testing
 
 For fast layout regression tests without building upstream software or
 running Docker:
@@ -84,6 +112,30 @@ python3 -m unittest discover -s tests -v
 These use temporary fixture sources and stub the expensive build commands.
 They require `git`, `dpkg-dev`, `fakeroot`, `zstd` and Python 3, and do not
 replace the full build and installation smoke tests.
+
+After building, run the integration checks **only on a disposable test host**.
+It needs systemd, its own Docker daemon with buildx, and the test/publication
+tools used by CI (`curl`, Python 3, `dpkg-dev`, `apt-utils`, GnuPG):
+
+```sh
+sudo ci/smoke-test.sh build/dist
+ci/make-apt-repo.sh build/dist
+sudo ci/apt-repo-test.sh build/dist
+```
+
+The smoke test installs all five packages, checks the dashboard, runs the Hello
+workflow as a second user and exports skills. The apt test verifies signatures
+when signed metadata is present; otherwise it explicitly tests an unsigned
+repository. Use a disposable signing key for signature-path testing, not a
+production private key.
+
+For packaging changes, also test reinstall/upgrade behavior and preservation of
+existing run records and configuration. The server's update hook may activate
+shared services, so runtime-state files need not remain byte-identical. Run
+workflows from the shared workspace as the test member, not another user's home.
+When comparing builds, distinguish application changes from debug metadata,
+timestamps and generated caches; successful smoke tests alone do not establish
+bit-for-bit reproducibility.
 
 ## Updating upstream
 
@@ -149,3 +201,47 @@ drains running workflows first, which could take hours); otherwise it tells you
 to run `sudo asys-server-update --update` later or `asys-run --upgrade RUN`. Shared git checkouts under
 `/srv/asys/workspaces` need a per-member
 `git config --global --add safe.directory /srv/asys/workspaces/NAME`.
+
+## Operational caveats
+
+- **Docker access is privileged.** `asys-adduser` grants membership in both
+  `asys` and `docker`. Docker-group access is root-equivalent; the current team
+  setup assumes trusted users on a dedicated host, not hostile multi-tenancy.
+- **Base-image bundling is not complete offline operation.** Environment images
+  are built when workflows run, and starting/updating inference can build the
+  gateway image and fetch dependencies. Test network requirements for the
+  deployment you intend to support.
+- **Minimal images may exclude examples.** A dpkg rule such as
+  `path-exclude=/usr/share/doc/*` can discard the packaged Hello workflow.
+  Ensure `/usr/share/doc/asys/examples/` is retained before installing/testing;
+  if already excluded, adjust the policy and reinstall `asys`.
+- **Shared state requires shared permissions.** Use the provided group-aware
+  setup under `/srv/asys/host` and `/srv/asys/workspaces`; do not work around
+  access errors by making state world-writable. Configure Git trust for specific
+  shared checkouts rather than disabling ownership checks globally.
+- **Upgrades can start services.** When no run is active, the server upgrade
+  hook invokes `asys update`, which can activate the inference and Human
+  services. Retain state, credentials and old images needed by existing work.
+
+## Future work
+
+These are directions to evaluate, **not implemented features or release
+commitments**:
+
+1. **More projects and release conventions.** Add capsa under `pkg/capsa/`,
+   with its source pin and build/tests. Define how independently versioned
+   projects participate in repository-wide releases before generalizing the
+   current asys-oriented tag and cumulative-release scheme.
+2. **Reproducible, leaner artifacts.** Normalize build paths and timestamps,
+   avoid copying host Python bytecode into images, and exclude unnecessary
+   package-manager logs/caches and compile caches. Add repeat-build comparisons.
+3. **Isolated upgrade coverage.** Automate disposable build/install environments
+   and expand CI beyond the existing smoke test to state-preserving upgrades,
+   active-run handling, signed apt checks and minimal-image policies.
+4. **Image delivery and offline deployment.** Evaluate prebuilding the gateway
+   and offering registry-based image distribution alongside bundled images.
+   Preserve release/build identity and document the different network needs.
+5. **Deployment hardening and portability.** Evaluate rootless Docker or scoped
+   access with explicit asys/dcomp compatibility tests, and add architectures,
+   distributions or packaging formats when needed. Reduce packaging-specific
+   helpers where upstream can provide the same functionality.
