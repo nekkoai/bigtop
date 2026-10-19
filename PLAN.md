@@ -266,7 +266,7 @@ is covered by `asys-images-load`; 4–6 remain nice-to-haves.
 
 ## 7. Milestones
 
-Status (2026-10-19): rebased on asys 0.2.2 (see VALIDATION-0.2.2.md): release.json
+Status (2026-10-19): rebased on asys 0.2.2: release.json
 ships in asys-images, one build ID across packages, docker-buildx dependency,
 asys-flow-view package, /srv/asys/host layout, upgrade hook skips active runs.
 
