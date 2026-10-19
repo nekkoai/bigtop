@@ -9,6 +9,7 @@ can be added without introducing another packaging repository.
 Upstream sources are pinned as git submodules under `upstream/`; GitHub
 Actions builds, smoke-tests and (on `v*` tags) releases the `.deb`s.
 Historical asys design notes: [PLAN.md](PLAN.md).
+Full-build and migration validation: [VALIDATION-LAYOUT.md](VALIDATION-LAYOUT.md).
 
 | Package | Built by | Contents |
 |---|---|---|
