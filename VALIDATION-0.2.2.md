@@ -1,5 +1,8 @@
 # Validation of asys-debian (built for asys 0.2.0) against asys 0.2.2 / dcomp 0.3.2
 
+Historical validation from `asys-debian`; paths below predate the move to
+`pkg/` in bigtop. See [README.md](README.md) for the current layout.
+
 Date: 2026-09-30. Reviewed upstream `562fa30` (0.2.0, our pin) → `7fd29b7`
 (tag `v0.2.2`, 46 commits) and dcomp `v0.3.2` → `origin/main` (1 commit).
 

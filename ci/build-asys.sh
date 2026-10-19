@@ -1,11 +1,11 @@
 #!/bin/sh
-# Build the asys and asys-server .debs from the pinned upstream submodule.
+# Build the asys, asys-server and asys-flow-view .debs from the pinned upstream submodule.
 # Usage: ci/build-asys.sh [UPSTREAM_DIR] [REV]
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 upstream=$(cd "${1:-$here/upstream/asys}" && pwd)
 rev=${2:-HEAD}
-version=$(dpkg-parsechangelog -l "$here/asys/debian/changelog" -S Version | sed 's/-[^-]*$//')
+version=$(dpkg-parsechangelog -l "$here/pkg/asys/debian/changelog" -S Version | sed 's/-[^-]*$//')
 work=$here/build/asys
 rm -rf "$work"; mkdir -p "$work"
 src=$work/asys-$version
@@ -23,6 +23,6 @@ pipv() { PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --disable-pip-versio
 pipv "$src/hostdeps" -r "$src/python/requirements-host.txt"
 pipv "$src/hostdeps-human" -r "$src/asys-human-interface/requirements-host.txt"
 tar -C "$work" -cJf "$work/asys_$version.orig.tar.xz" "asys-$version"
-cp -a "$here/asys/debian" "$src/"
+cp -a "$here/pkg/asys/debian" "$src/"
 (cd "$src" && dpkg-buildpackage -us -uc -b ${DPKG_BUILDPACKAGE_OPTS:--d})
 ls -l "$work"/*.deb

@@ -6,7 +6,8 @@
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 upstream=$(cd "${1:-$here/upstream/asys}" && pwd)
-debversion=$(dpkg-parsechangelog -l "$here/asys/debian/changelog" -S Version)
+# A separate packaging unit, but always versioned with the asys host packages.
+debversion=$(dpkg-parsechangelog -l "$here/pkg/asys/debian/changelog" -S Version)
 upstream_version=${debversion%%-*}
 build=$("$upstream/tools/build-id")
 work=$here/build/asys-images
@@ -23,9 +24,9 @@ docker save $refs | zstd -T0 -19 -q -o "$pkg/usr/share/asys/images/asys-images.t
 # Build-host record; asys-images-load rewrites it with this engine's image IDs
 # into /usr/share/asys/release.json (IDs differ between Docker image stores).
 install -m 0644 "$release" "$pkg/usr/share/asys/images/release.json"
-install -m 0755 "$here/asys-images/asys-images-load" "$pkg/usr/sbin/"
-install -m 0755 "$here/asys-images/postinst" "$here/asys-images/postrm" "$pkg/DEBIAN/"
-sed -e "s/@VERSION@/$debversion/" -e "s/@UPSTREAM@/$upstream_version/" -e "s/@BUILD@/$build/" "$here/asys-images/control.in" > "$pkg/DEBIAN/control"
+install -m 0755 "$here/pkg/asys-images/debian/asys-images-load" "$pkg/usr/sbin/"
+install -m 0755 "$here/pkg/asys-images/debian/postinst" "$here/pkg/asys-images/debian/postrm" "$pkg/DEBIAN/"
+sed -e "s/@VERSION@/$debversion/" -e "s/@UPSTREAM@/$upstream_version/" -e "s/@BUILD@/$build/" "$here/pkg/asys-images/debian/control.in" > "$pkg/DEBIAN/control"
 size=$(du -sk "$pkg/usr" | cut -f1); echo "Installed-Size: $size" >> "$pkg/DEBIAN/control"
 (cd "$pkg" && find usr -type f -exec md5sum {} + > DEBIAN/md5sums)
 fakeroot dpkg-deb -Zzstd -z0 --build "$pkg" "$work/" >/dev/null 2>&1 || fakeroot dpkg-deb -Znone --build "$pkg" "$work/"

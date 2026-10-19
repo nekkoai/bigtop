@@ -1,5 +1,9 @@
 # asys Debian packaging plan (Ubuntu 24.04 "noble", amd64)
 
+Historical design from `asys-debian`, retained for context. Paths and proposals
+below describe that repository at the time; see [README.md](README.md) for
+the current bigtop layout and build instructions.
+
 Goal: `apt install asys-server` on a team server gives every engineer in group
 `asys` a shared, upgradeable asys instance under `/srv/asys`, used as:
 

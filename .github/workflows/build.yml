@@ -34,6 +34,9 @@ jobs:
             debhelper dh-python devscripts fakeroot python3-pip zstd apt-utils gnupg \
             pkg-config libxaw7-dev libxmu-dev libxt-dev libxft-dev libxrender-dev libfontconfig-dev libx11-dev
 
+      - name: Packaging regression tests
+        run: python3 -m unittest discover -s tests -v
+
       - name: Build packages
         run: ci/build-all.sh
 

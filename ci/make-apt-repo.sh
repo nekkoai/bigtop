@@ -18,7 +18,7 @@ apt-ftparchive \
     -o APT::FTPArchive::Release::Suite=stable \
     -o APT::FTPArchive::Release::Codename=noble \
     -o APT::FTPArchive::Release::Architectures="amd64 all" \
-    -o APT::FTPArchive::Release::Description="asys and dcomp packages for Ubuntu 24.04 (gh-ainekko/asys-debian)" \
+    -o APT::FTPArchive::Release::Description="Ainekko packages for Ubuntu 24.04 (gh-ainekko/bigtop)" \
     release . > Release
 if gpg --batch --list-secret-keys "$fpr" >/dev/null 2>&1; then
     gpg --batch --yes --local-user "$fpr" --digest-algo SHA256 --clearsign -o InRelease Release
