@@ -13,5 +13,8 @@ if [ "$1" = configure ]; then
     if [ ! -d /srv/capsa/snapshots ]; then
         install -d -m 0755 /srv/capsa/snapshots
     fi
+    # --no-start deliberately omits debhelper's start/restart snippet, including
+    # its reload. Refresh unit definitions without activating any of them.
+    if [ -d /run/systemd/system ]; then systemctl --system daemon-reload || true; fi
 fi
 #DEBHELPER#

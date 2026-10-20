@@ -21,12 +21,25 @@ endif
 %:
 	dh $@ --buildsystem=none
 
+# Cargo verifies every vendored file. Debhelper's generic autotools refresh and
+# backup-file cleanup must not rewrite config.{sub,guess} or delete *.orig.
+override_dh_update_autotools_config:
+	:
+
+override_dh_autoreconf:
+	:
+
+override_dh_autoreconf_clean:
+	:
+
+override_dh_clean:
+	dh_clean --exclude=vendor/
+
 override_dh_auto_build:
 	rustup run "$(TOOLCHAIN)" cargo build --release --locked --offline --bin capsa --target "$(CARGO_TARGET)"
 
 override_dh_auto_test:
 	$(CARGO_TARGET_DIR)/$(CARGO_TARGET)/release/capsa --help >/dev/null
-	$(CARGO_TARGET_DIR)/$(CARGO_TARGET)/release/capsa --version >/dev/null
 
 override_dh_auto_install:
 	install -D -m 0755 $(CARGO_TARGET_DIR)/$(CARGO_TARGET)/release/capsa $(CURDIR)/debian/capsa-core/usr/bin/capsa

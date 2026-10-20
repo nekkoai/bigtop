@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -134,8 +135,8 @@ def start_writer():
         "systemd-run", "--unit=capsa-test-writer", "--collect",
         "--property=User=capsa", "--property=Group=capsa",
         "--property=UMask=0077", "--property=KillSignal=SIGINT",
-        "--property=Restart=no", "--property=Environment=HF_HOME=/usr/share/capsa/tokenizers",
-        "--property=Environment=HF_HUB_OFFLINE=1",
+        "--property=Restart=no", "--setenv=HF_HOME=/usr/share/capsa/tokenizers",
+        "--setenv=HF_HUB_OFFLINE=1",
         "/usr/bin/capsa", "--base-url", "http://127.0.0.1:9001/v1",
         "--model", "nomic-ai/nomic-embed-text-v1.5", "--db-path", str(FIXTURE_DB),
         "serve", "--bind", "127.0.0.1:10180", "--rw",
@@ -171,7 +172,9 @@ async def writer_fixture():
                 result = await client.call_tool(
                     "ingest", {"text": text, "metadata": {"title": f"smoke-{source}", "source": source}}
                 )
-                tool_body(result)
+                # The native ingest tool acknowledges with plain text, not JSON.
+                if result.isError:
+                    raise SmokeError(f"native ingest failed: {result.content!r}")
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
                 body = tool_body(await client.call_tool(
@@ -201,7 +204,18 @@ def sdk_retry(label, unit, operation, timeout=300):
         except Exception as exc:  # a server can be active before MCP is ready
             error = exc
             time.sleep(1)
-    raise SmokeError(f"timed out waiting for {label}: {error}\n{service_logs(unit)}")
+    raise SmokeError(f"timed out waiting for {label}: {error!r}\n{service_logs(unit)}")
+
+
+async def probe_sdk(port, expected_tools):
+    async with streamablehttp_client(
+        f"http://127.0.0.1:{port}/mcp", timeout=timedelta(seconds=10)
+    ) as (reader, writer, _):
+        async with ClientSession(reader, writer, read_timeout_seconds=timedelta(seconds=10)) as client:
+            await client.initialize()
+            tools = {tool.name for tool in (await client.list_tools()).tools}
+            if tools != expected_tools:
+                raise SmokeError(f"unexpected tools on port {port}: {tools}")
 
 
 def stop_writer_checkpointed():
@@ -209,8 +223,17 @@ def stop_writer_checkpointed():
     wait_until("test writer stop", lambda: not unit_active("capsa-test-writer.service"), timeout=60)
     if not FIXTURE_DB.is_file() or FIXTURE_DB.stat().st_size == 0:
         raise SmokeError("writer did not leave a nonempty staging fixture.db")
-    # Do not use sqlite3/integrity_check here: Capsa owns the libSQL format.
-    # A sidecar means copying this main file could silently omit committed work.
+    # Only our stopped, synthetic staging fixture is checkpointed here. WAL
+    # checkpointing copies opaque SQLite pages; do not run integrity_check or
+    # substitute SQLite for the native libSQL ingest/search/vector operations.
+    connection = sqlite3.connect(FIXTURE_DB)
+    try:
+        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint is None or checkpoint[0] != 0:
+            raise SmokeError(f"synthetic fixture checkpoint was busy: {checkpoint}")
+    finally:
+        connection.close()
+    # Registration itself never performs this operation on operator snapshots.
     for suffix in ("-wal", "-shm", "-journal"):
         sidecar = Path(str(FIXTURE_DB) + suffix)
         if sidecar.exists():
@@ -270,7 +293,9 @@ def recover_and_probe(owned):
     run("capsa-managed-recover")
     for unit in UNITS + ("capsa-gateway.service",):
         wait_unit(unit)
-    sdk_retry("gateway MCP SDK readiness", "capsa-gateway.service", gateway_fixture)
+    sdk_retry("gateway MCP SDK readiness", "capsa-gateway.service",
+              lambda: probe_sdk(10084, {"search", "fetch_document", "list_sources"}))
+    asyncio.run(gateway_fixture())
 
 
 def debs_in(dist):
@@ -352,7 +377,11 @@ def main():
 
         owned.add("capsa-test-writer.service")
         start_writer()
-        sdk_retry("test writer MCP SDK readiness", "capsa-test-writer.service", writer_fixture)
+        sdk_retry("test writer MCP SDK readiness", "capsa-test-writer.service",
+                  lambda: probe_sdk(10180, {"search", "fetch_document", "ingest"}))
+        # Do not retry submissions after an application/test error: that creates
+        # duplicate ingestion jobs rather than testing transport readiness.
+        asyncio.run(writer_fixture())
         stop_writer_checkpointed()
 
         copy_and_register_snapshots()

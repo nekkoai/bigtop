@@ -105,6 +105,8 @@ Registration records destination-local file identity and SHA-256 generations;
 it emits federation configuration after all four sources are registered. Native
 Capsa immutable startup validates the libSQL schema. No generic SQLite integrity
 check is substituted for libSQL vector support.
+Startup checks the registered file stamp rather than rehashing entire NFS images.
+Stop the gateway and readers before re-registering an existing source.
 
 A root-owned `/etc/capsa/paths.json` may select another absolute `snapshot_root`;
 keep it outside writable service-state/cache directories. For remote mounts,
@@ -160,6 +162,8 @@ sudo env CAPSA_DISPOSABLE_TEST_HOST=1 ci/smoke-test-capsa.sh build/capsa-dist
 
 Fixture tests do not compile native code. The smoke test is for real package and
 synthetic-data behavior, not proof that existing production indexes are compatible
-with the new llama release. Offline target dependency closure, broader upgrade/
+with the new llama release. It checkpoints only its own stopped staging fixture;
+registration and maintainer scripts never checkpoint operator databases.
+Offline target dependency closure, broader upgrade/
 recovery coverage and production index compatibility remain further validation,
 not prerequisites to producing these experimental test packages.

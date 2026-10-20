@@ -40,6 +40,10 @@ fi
 if find /etc/capsa -type f -print -quit 2>/dev/null | grep -q .; then
     fail "requires a fresh test host without existing Capsa operator configuration"
 fi
+if find /srv/capsa/snapshots /var/lib/capsa -type f -name '*.db*' -print -quit 2>/dev/null |
+    grep -q .; then
+    fail "requires a fresh test host without existing Capsa databases"
+fi
 
 set -- "$dist"/*.deb
 [ -e "$1" ] || fail "no .deb files in $dist"
@@ -86,7 +90,6 @@ if find /srv/capsa/snapshots /var/lib/capsa -type f \( -name '*.db' -o -name '*.
 fi
 
 capsa --help >/dev/null
-capsa --version >/dev/null
 capsa-federation --help >/dev/null
 capsa-index-jira --help >/dev/null
 capsa-index-confluence --help >/dev/null

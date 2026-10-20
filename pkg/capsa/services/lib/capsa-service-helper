@@ -228,10 +228,12 @@ def validate_backend(name, config=None):
     stamp = validate_snapshot_file(db, root)
     if config["stamp"] != stamp:
         fail(f"snapshot identity changed since registration: {name}")
-    actual = sha256(db)
-    if not re.fullmatch(r"[0-9a-f]{64}", config["sha256"]) or actual != config["sha256"]:
-        fail(f"snapshot checksum changed since registration: {name}")
-    if config["generation"] != "sha256:" + actual:
+    # Registration hashes the complete checkpoint. Startup checks its registered
+    # destination-local stamp instead of repeatedly scanning large NFS images.
+    digest = config["sha256"]
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        fail(f"invalid registered snapshot checksum: {name}")
+    if config["generation"] != "sha256:" + digest:
         fail(f"snapshot generation is not derived from its checksum: {name}")
     return config
 
@@ -289,6 +291,8 @@ def register_snapshot(name, database, checkpointed):
     db = Path(database)
     stamp = validate_snapshot_file(db, root)
     digest = sha256(db)
+    if snapshot_stamp(db) != stamp:
+        fail("snapshot changed while computing its registration checksum")
     backend = {"format": 1, "name": name, "database": str(db.resolve()),
                "bind": f"127.0.0.1:{PORTS[name]}", "generation": "sha256:" + digest,
                "sha256": digest, "immutable_ready": True, "checkpointed": True,

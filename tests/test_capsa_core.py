@@ -66,6 +66,10 @@ elif [ "$*" = "run $FIXTURE_TOOLCHAIN cargo vendor --locked vendor" ]; then
     echo 'fixture license' > vendor/fixture/LICENSE
     [ "${FIXTURE_CHANGE_LOCK:-0}" = 0 ] || echo '# changed' >> Cargo.lock
     printf '[source.crates-io]\\nreplace-with = "vendored-sources"\\n[source.vendored-sources]\\ndirectory = "vendor"\\n'
+elif [ "$*" = "run $FIXTURE_TOOLCHAIN cargo build --release --locked --offline --bin capsa --target x86_64-unknown-linux-gnu" ]; then
+    mkdir -p "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release"
+    printf '#!/bin/sh\\nexit 0\\n' > "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/capsa"
+    chmod +x "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/capsa"
 else
     echo "Unexpected fake rustup call: $*" >&2
     exit 2
@@ -130,6 +134,24 @@ touch ../capsa-core_fixture_amd64.deb ../capsa_fixture_amd64.buildinfo
         self.assertFalse((self.repo / "build/capsa-core").exists())
         self.assertNotIn("vendor", (self.repo / "tool.log").read_text())
 
+    @unittest.skipUnless(shutil.which("dh") and shutil.which("make"), "requires debhelper/make")
+    def test_debhelper_preserves_locked_vendor_files(self):
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        source = next(p for p in (self.repo / "build/capsa-core").iterdir()
+                      if p.is_dir() and (p / "debian").exists())
+        files = {}
+        for name in ("Cargo.toml.orig", "config.guess", "config.sub"):
+            path = source / "vendor/fixture" / name
+            files[path] = b"locked fixture bytes\n"
+            path.write_bytes(files[path])
+        for target in ("clean", "build"):
+            result = subprocess.run(["make", "-f", "debian/rules", target],
+                                    cwd=source, env=self.env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path, content in files.items():
+            self.assertEqual(path.read_bytes(), content)
+
     def test_changed_cargo_lock_is_rejected_before_package_build(self):
         result = self.build(FIXTURE_CHANGE_LOCK="1")
         self.assertNotEqual(result.returncode, 0)
@@ -160,6 +182,9 @@ class CapsaCorePolicyTest(unittest.TestCase):
         self.assertIn("--offline", rules)
         self.assertIn("target-cpu=x86-64", rules)
         self.assertNotIn("target-cpu=native", rules)
+        self.assertIn("dh_clean --exclude=vendor/", rules)
+        self.assertIn("override_dh_update_autotools_config:", rules)
+        self.assertIn("override_dh_autoreconf:", rules)
         self.assertIn("dh_installsystemd --no-start --no-enable", rules)
         server = control.split("Package: capsa-server\n", 1)[1]
         self.assertNotIn("capsa-indexers", server.split("Suggests:", 1)[0])
