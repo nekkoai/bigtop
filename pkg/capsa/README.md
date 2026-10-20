@@ -25,7 +25,9 @@ runtime, asset and service acceptance gates are met.
 - llama.cpp: candidate `677e6ccf6261b86be2e99cd078d5275c8ee950f6`
   (`et-b10239-677e6cc`) from the requested fork. The supplied deployment revision
   `b10e773ea138f1fd6ef3e1bad93e4e4ca0924b00` could not be fetched from that fork
-  or resolved through the canonical repository's commit API.
+  or resolved through the canonical repository's commit API. The supplied runtime
+  manifest identifies build 6875 at that revision and a retained source archive,
+  but does not include the archive or a downloadable archive URL.
 
 **The candidate llama pin is not an approved replacement for existing indexes.**
 No llama package is built by the core recipe. Obtain the original source/pin or
@@ -75,30 +77,80 @@ no service setup, model download, data migration, Python installation, ingestion
 or post-install database access. Basic executable checks are not a replacement
 for the full offline serving acceptance tests below.
 
-## Remaining build-input gates
+## Supplied runtime records
 
-1. **Embedding assets and profile.** The source does not contain the deployed
-   GGUF, tokenizer cache, their manifests or their licenses. Obtain sanitized
-   asset metadata: immutable origins/revisions, filenames, sizes, SHA-256 values,
-   tokenizer cache/reference layout, applicable license notices, and tested
-   llama-server flags. Record model/quantization, tokenizer, preprocessing,
-   pooling/normalization and runtime settings together as one compatibility
-   profile. Do not substitute a similarly named model or a vocabulary fixture.
-2. **Python runtime and dependency artifacts.** Deployment notes name CPython
-   3.12.15, but the referenced interpreter archive, offline wheelhouse and rebuild
-   manifest are not in the source tree. `federation/requirements.lock` pins
-   versions but has no artifact hashes and includes test/build tools. Prepare
-   target-specific, hash-verified runtime inputs and separate production/test
-   dependency sets. Assemble the isolated application environment during package
-   build; never resolve dependencies or use a developer-home venv at install time.
-3. **Offline tokenizer loading.** Capsa currently calls
-   `Tokenizer::from_pretrained(model, None)`. Supplying `HF_HOME` alone does not
-   establish that the exact tokenizer is present or that downloads cannot occur.
-   Validate the packaged cache layout with outbound networking blocked.
-4. **Portable llama build.** Use an explicit CPU baseline, disable native/GPU
-   optimizations for this profile, retain OpenMP support, and package the matching
+The operator's sanitized runtime-materials export supplies the previously missing
+asset identities, launch settings, interpreter/native input provenance and
+artifact-hashed wheel locks. These are **input records, not packaged artifacts,
+signatures, or a successful portable rebuild**. The export intentionally omits
+binaries, models, wheels and license payloads. Its `repository_commit`
+(`0bb0c03046a427bc7ab0876b5f77e838596700bc`) is not bound to a named repository
+in the export and is not either current source pin. Clarify that provenance;
+do not replace an application gitlink with it.
+
+The recorded embedding profile is Nomic v1.5 Q4_K_M, 768 dimensions, llama.cpp
+build 6875, CPU-only/OpenMP, loopback `127.0.0.1:9001`, 24 threads and batch/ubatch
+4096. The original build had `GGML_NATIVE=true`. Keep the historical 24-thread
+setting distinct from a configurable deployment default.
+
+| Input | Immutable revision | SHA-256 |
+|---|---|---|
+| `nomic-ai/nomic-embed-text-v1.5-GGUF` / `nomic-embed-text-v1.5.Q4_K_M.gguf` (84,106,624 bytes) | `18d1044f4866e224159fce8c6fc5c4f3920176e7` | `d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac` |
+| `nomic-ai/nomic-embed-text-v1.5` / `tokenizer.json` (711,396 bytes) | `e9b6763023c676ca8431644204f50c2b100d9aab` | `d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66` |
+| Retained `llama.cpp-b10e773ea138.tar.gz` (not supplied) | reported `b10e773ea138f1fd6ef3e1bad93e4e4ca0924b00` | `10f6f06b64e89428a3fbfe127f16cfed7ca496adb6252825ee3519964aee6712` |
+
+The tokenizer manifest supplies the HF cache blob, snapshot symlink and `refs/main`
+contents. Capsa's 128-token preprocessing budget, prefix accounting and five-percent
+document overlap are separate from llama-server's context size. Pooling,
+normalization, server context size, parallel slots and GPU-layer defaults were
+not explicitly overridden in the recorded launch; do not invent numeric values
+or assume a different llama revision has equivalent defaults.
+
+Python records identify CPython 3.12.15 from python-build-standalone release
+`20261013`, exact native-package inputs, and 38 wheel artifacts (the original
+37-entry lock plus pip bootstrap). The original input lock matches the pinned
+federation lock byte-for-byte; full/runtime/test/bootstrap locks add artifact
+hashes without upgrading those versions. The native bundle's reported minimum is
+glibc 2.38; the recorded test host was Ubuntu 24.04 with glibc 2.39.
+
+The supplied dependency metadata resolves a 29-package application closure for
+CPython 3.12/Linux amd64 without a version conflict. The 32-entry runtime lock
+also includes pytest's `packaging` dependency and the build-only `setuptools` and
+`wheel`; the five-entry test delta relies on that placement. Separate those
+roles in packaging inputs without changing versions, and verify the downloaded
+wheels' own metadata before treating this record-level check as an installed
+runtime result.
+
+## Remaining build-input and validation gates
+
+1. **Fetch and verify artifacts.** Obtain bytes from the recorded immutable URLs
+   and compare sizes/hashes before assembling packages. Recover the retained llama
+   archive for historical source/default comparison; it is not permission to
+   replace the required fork pin silently. Collect the actual model/tokenizer and
+   runtime license notices, not only SPDX labels or paths into an absent license
+   directory. A manifest's digest is not independent proof of origin.
+2. **Reconstruct the Python environment.** Use the artifact-hashed locks and
+   verify their production dependency closure in a clean target interpreter.
+   Assemble at the final private prefixes during package build, with no install-time
+   pip or dependency resolution. Do not copy a deployed venv: its paths are
+   absolute and its patched ELF hashes differ from original wheel `RECORD` entries.
+   Evaluate distro `libcrypt`/compiler-runtime dependencies from the packaged ELFs
+   rather than automatically reproducing the deployment's private native libraries.
+3. **Offline tokenizer loading.** Capsa calls
+   `Tokenizer::from_pretrained(model, None)`. The locked `tokenizers`/`hf-hub`
+   source uses `main`, checks the cache first and downloads on a cache miss.
+   Generate the exact supplied layout; `refs/main` must contain the revision
+   without an added newline. Do not treat `HF_HUB_OFFLINE=1` alone as a download
+   prohibition for this Rust code path. Require complete, verified read-only
+   assets, fail closed on missing assets, and test with outbound networking blocked.
+4. **Portable llama build and compatibility.** Use an explicit CPU baseline,
+   disable native/GPU optimizations, retain OpenMP support, and package the matching
    executable/private libraries together. Do not install private llama/ggml
    libraries into the system library namespace. CUDA is a separate future profile.
+   The original native-optimized binary hashes identify historical artifacts,
+   not expected rebuild outputs. Compare embeddings/retrieval against the recorded
+   runtime before attaching existing indexes; matching assets and dimensions alone
+   do not establish numerical compatibility.
 
 ## Deployment contract for subsequent packages
 
