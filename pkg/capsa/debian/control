@@ -1,0 +1,18 @@
+Source: capsa
+Section: devel
+Priority: optional
+Maintainer: Roman <roman@nekko.ai>
+Build-Depends: debhelper-compat (= 13), build-essential, pkg-config, cmake,
+ python3, clang, libclang-dev, libssl-dev, liblzma-dev, zlib1g-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/nekkoai/capsa
+Rules-Requires-Root: no
+
+Package: capsa-core
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: embedding-based document storage and retrieval CLI
+ capsa indexes documents and queries a libSQL vector database using an
+ OpenAI-compatible embedding service. This package contains only the capsa
+ command-line program; it does not install a service, database, models, or
+ embedding credentials.

@@ -3,8 +3,9 @@
 Ainekko's packaging and deployment repository. The first supported package
 set is [asys](https://github.com/glguida/asys) and
 [dcomp](https://github.com/glguida/dcomp) on Ubuntu 24.04 (noble, amd64),
-imported with history from `gh-ainekko/asys-debian`. Capsa and other artifacts
-can be added without introducing another packaging repository.
+imported with history from `gh-ainekko/asys-debian`.
+[Capsa packaging](pkg/capsa/README.md) is being introduced separately, starting
+with a core build recipe; its complete serving stack is not yet packaged.
 
 Upstream sources are pinned as git submodules under `upstream/`; GitHub
 Actions builds, smoke-tests and (on `v*` tags) releases the `.deb`s.
@@ -18,6 +19,11 @@ Contributor and agent guidance: [AGENTS.md](AGENTS.md).
 | `asys-flow-view` | `ci/build-asys.sh` | X11 workflow viewer/editor |
 | `asys-server` | `ci/build-asys.sh` | shared team instance under `/srv/asys` (`asys init /srv/asys/host --group asys`, as upstream documents) |
 
+The table above is the current release set. Capsa's `capsa-core` recipe uses
+`ci/build-capsa-core.sh` and a separate CI job; it is not yet part of the asys/dcomp
+release workflow. See its README for the intended eight-package split and the
+remaining runtime, embedding-compatibility and service acceptance gates.
+
 ## Layout
 
 ```
@@ -26,7 +32,10 @@ pkg/
     debian/                   source packaging: asys, asys-server, asys-flow-view
     images/debian/            asys-images control template, hooks and loader
   dcomp/debian/                source packaging: dcomp
+  capsa/debian/                initial capsa-core recipe; see pkg/capsa/README.md
 upstream/asys, upstream/dcomp  pinned upstream releases (submodules)
+upstream/capsa                 pinned combined Capsa source
+upstream/llama.cpp             candidate llama source; compatibility not validated
 keys/                         apt repository signing public key
 ci/                           shared build, test and publication scripts
 tests/                        lightweight packaging-path regression tests
@@ -48,7 +57,7 @@ package. It deliberately shares `upstream/asys` and reads its version from
 pin. The Dockerfiles remain upstream, while the image-bundle packaging lives
 here.
 
-Future packages (for example `pkg/capsa/debian/`) should follow this convention
+Additional projects should follow this convention
 and be wired into the build/test pipeline explicitly. Non-package deployment
 recipes can live under `deploy/<product>/` when needed; install-time service
 units and hooks stay with the packages that ship them. No placeholder
@@ -86,7 +95,7 @@ and modify apt configuration; do not run them on a working deployment.
 ```sh
 git clone --recursive https://github.com/gh-ainekko/bigtop.git
 cd bigtop
-ci/build-all.sh                 # -> build/dist/*.deb
+ci/build-all.sh                 # current asys/dcomp release set -> build/dist/*.deb
 ```
 
 Needs Go ≥ 1.25 on PATH, `debhelper`, `dh-python`, `devscripts`, `fakeroot`,
@@ -228,8 +237,8 @@ to run `sudo asys-server-update --update` later or `asys-run --upgrade RUN`. Sha
 These are directions to evaluate, **not implemented features or release
 commitments**:
 
-1. **More projects and release conventions.** Add capsa under `pkg/capsa/`,
-   with its source pin and build/tests. Define how independently versioned
+1. **More projects and release conventions.** Complete the staged Capsa packages
+   under `pkg/capsa/` and their acceptance tests. Define how independently versioned
    projects participate in repository-wide releases before generalizing the
    current asys-oriented tag and cumulative-release scheme.
 2. **Reproducible, leaner artifacts.** Normalize build paths and timestamps,

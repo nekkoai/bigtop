@@ -1,0 +1,38 @@
+#!/usr/bin/make -f
+TOOLCHAIN := $(shell python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+CARGO_TARGET = x86_64-unknown-linux-gnu
+export RUSTUP_TOOLCHAIN = $(TOOLCHAIN)
+export RUSTFLAGS = -C target-cpu=x86-64 --remap-path-prefix=$(CURDIR)=.
+export CFLAGS = $(shell dpkg-buildflags --get CFLAGS) -march=x86-64 -mtune=generic
+export CXXFLAGS = $(shell dpkg-buildflags --get CXXFLAGS) -march=x86-64 -mtune=generic
+export CARGO_NET_OFFLINE = true
+export CARGO_TARGET_DIR = $(CURDIR)/debian/cargo-target
+DOC = $(CURDIR)/debian/capsa-core/usr/share/doc/capsa-core
+
+ifneq ($(shell printf '%s\n' '$(TOOLCHAIN)' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$$' >/dev/null && echo yes),yes)
+$(error rust-toolchain.toml must pin an exact x.y.z Rust release)
+endif
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+ifeq ($(DEB_HOST_ARCH),amd64)
+else
+$(error capsa-core is supported only on amd64)
+endif
+
+%:
+	dh $@ --buildsystem=none
+
+override_dh_auto_build:
+	rustup run "$(TOOLCHAIN)" cargo build --release --locked --offline --bin capsa --target "$(CARGO_TARGET)"
+
+override_dh_auto_test:
+	$(CARGO_TARGET_DIR)/$(CARGO_TARGET)/release/capsa --help >/dev/null
+	$(CARGO_TARGET_DIR)/$(CARGO_TARGET)/release/capsa --version >/dev/null
+
+override_dh_auto_install:
+	install -D -m 0755 $(CARGO_TARGET_DIR)/$(CARGO_TARGET)/release/capsa $(CURDIR)/debian/capsa-core/usr/bin/capsa
+	install -d $(DOC)/vendor
+	install -m 0644 README.md LICENSE Cargo.lock $(DOC)/
+	cd vendor && find . -type f \( -name Cargo.toml -o -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -iname 'UNLICENSE*' \) -exec cp --parents -t $(DOC)/vendor {} +
+
+override_dh_auto_clean:
+	rm -rf debian/cargo-target

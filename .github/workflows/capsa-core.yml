@@ -1,0 +1,73 @@
+name: capsa-core
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/capsa-core.yml'
+      - '.gitmodules'
+      - 'upstream/capsa'
+      - 'pkg/capsa/**'
+      - 'ci/build-capsa-core.sh'
+      - 'tests/**'
+  pull_request:
+    paths:
+      - '.github/workflows/capsa-core.yml'
+      - '.gitmodules'
+      - 'upstream/capsa'
+      - 'pkg/capsa/**'
+      - 'ci/build-capsa-core.sh'
+      - 'tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_JOBS: '2'
+      DEB_BUILD_OPTIONS: parallel=2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Native build and fixture-test dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            build-essential debhelper devscripts fakeroot pkg-config cmake clang \
+            libclang-dev libssl-dev liblzma-dev zlib1g-dev ca-certificates \
+            python3 zstd
+
+      - name: Install the pinned build-only Rust toolchain
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pkg/capsa/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$version" --profile minimal --target x86_64-unknown-linux-gnu
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Packaging regression tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Build capsa-core
+        run: ci/build-capsa-core.sh
+
+      # This runner is disposable. No service or model is installed by this slice.
+      - name: Install and check the native executable
+        run: |
+          sudo apt-get install -y "$PWD"/build/capsa-core/capsa-core_*.deb
+          capsa --version
+          capsa --help
+          dpkg-deb --field build/capsa-core/capsa-core_*.deb Depends
+          dpkg --audit
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capsa-core-noble-amd64
+          path: |
+            build/capsa-core/*.deb
+            build/capsa-core/*.buildinfo
+            build/capsa-core/*.changes
+          if-no-files-found: error

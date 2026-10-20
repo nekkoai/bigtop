@@ -4,3 +4,9 @@
 [submodule "upstream/asys"]
 	path = upstream/asys
 	url = https://github.com/glguida/asys
+[submodule "upstream/capsa"]
+	path = upstream/capsa
+	url = https://github.com/nekkoai/capsa.git
+[submodule "upstream/llama.cpp"]
+	path = upstream/llama.cpp
+	url = https://github.com/aifoundry-org/llama.cpp.git
