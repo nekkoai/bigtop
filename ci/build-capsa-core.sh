@@ -64,5 +64,10 @@ git -C "$upstream" show "$pin:Cargo.lock" | cmp -s - "$src/Cargo.lock" ||
 
 tar -C "$work" -cJf "$work/capsa_$version.orig.tar.xz" "capsa-$version"
 cp -a "$here/pkg/capsa/debian" "$src/"
+cp -a "$here/pkg/capsa/launchers" "$src/debian/"
+cp -a "$here/pkg/capsa/services" "$src/debian/"
+for package in capsa-core capsa-federation capsa-indexers capsa-services capsa-server; do
+    install -m 0755 "$here/pkg/capsa/upgrade-guard" "$src/debian/$package.preinst"
+done
 (cd "$src" && dpkg-buildpackage -us -uc -b ${DPKG_BUILDPACKAGE_OPTS:-})
 ls -l "$work"/*.deb "$work"/*.buildinfo

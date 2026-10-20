@@ -5,7 +5,7 @@ Source: https://github.com/nekkoai/capsa
 Files: *
 Copyright: 2025 Gianluca Guida
 License: MIT
- See the upstream LICENSE text installed in /usr/share/doc/capsa-core/.
+ See the upstream LICENSE text installed alongside this copyright file.
 
 Files: vendor/*
 Copyright: vendored crate authors

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "python_version": "3.12.15",
+  "python_build_standalone_release": "20261013",
+  "target": "CPython 3.12 / Linux x86_64 GNU libc",
+  "python_archive": {
+    "id": "python",
+    "group": "python",
+    "filename": "cpython-3.12.15+20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "sha256": "178d3d83b6e8e99285a65d3fce9c16b87952cc5efdb4d1a0e3ff3be18ff0fc9c",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.12.15%2B20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    "license": "See archive python/share/licenses and lib/python3.12/LICENSE.txt"
+  },
+  "production_wheel_count": 29,
+  "bootstrap_wheel": {
+    "name": "pip",
+    "version": "26.2.1",
+    "filename": "pip-26.2.1-py3-none-any.whl",
+    "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e",
+    "url": "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl",
+    "requires_python": ">=3.10",
+    "upload_time": "2026-08-04T22:51:12.472093Z"
+  }
+}

@@ -1,0 +1,41 @@
+[Unit]
+Description=Capsa read-only federated MCP gateway
+Requires=capsa-snapshot@drive.service capsa-snapshot@slides.service capsa-snapshot@confluence.service capsa-snapshot@jira.service
+After=network-online.target capsa-snapshot@drive.service capsa-snapshot@slides.service capsa-snapshot@confluence.service capsa-snapshot@jira.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=capsa
+Group=capsa
+UMask=0077
+Environment=HOME=/var/lib/capsa
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONNOUSERSITE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper preflight-gateway
+ExecStartPre=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper wait-backend drive
+ExecStartPre=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper wait-backend slides
+ExecStartPre=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper wait-backend confluence
+ExecStartPre=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper wait-backend jira
+ExecStart=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper serve-gateway
+Restart=no
+TimeoutStartSec=1200
+TimeoutStopSec=150
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/etc/capsa /srv/capsa/snapshots /usr/share/capsa /usr/lib/capsa /usr/bin/capsa-federation
+ReadWritePaths=/var/lib/capsa /var/cache/capsa
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+Package: capsa-python-runtime
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Roman <roman@nekko.ai>
+Section: python
+Priority: optional
+Depends: @SHLIBDEPS@
+Homepage: https://github.com/nekkoai/capsa
+Description: private CPython runtime for Capsa federation components
+ This package provides the pinned private CPython 3.12 runtime and the
+ production-only Python dependency closure used by Capsa federation components.
+ It installs no application code, service, virtual environment, pip bootstrap,
+ or install-time network or service action.

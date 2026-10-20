@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/launch/indexer.py confluence "$@"

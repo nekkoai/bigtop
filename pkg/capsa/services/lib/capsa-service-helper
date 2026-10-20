@@ -1,0 +1,454 @@
+#!/usr/lib/capsa/python/bin/python3.12 -I
+"""Small, fail-closed helpers for Capsa's explicitly managed read-only stack."""
+import argparse
+import hashlib
+import json
+import os
+import grp
+import re
+import socket
+
+import stat
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+NAMES = ("drive", "slides", "confluence", "jira")
+PORTS = {"drive": 10080, "slides": 10081, "confluence": 10082, "jira": 10083}
+MODEL = Path("/usr/share/capsa/models/nomic-embed-text-v1.5.Q4_K_M.gguf")
+MODEL_SHA256 = "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac"
+MODEL_BYTES = 84106624
+TOKENIZER_ROOT = Path("/usr/share/capsa/tokenizers")
+TOKENIZER_REVISION = "e9b6763023c676ca8431644204f50c2b100d9aab"
+TOKENIZER_SHA256 = "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+TOKENIZER_BYTES = 711396
+TOKENIZER_BLOB = "688882a79f44442ddc1f60d70334a7ff5df0fb47"
+TOKENIZER_REPO = "models--nomic-ai--nomic-embed-text-v1.5"
+ASSET_MANIFEST = Path("/usr/share/capsa/embedding-assets-nomic/manifest.json")
+CONFIG_DIR = Path("/etc/capsa")
+SNAPSHOT_ROOT = Path("/srv/capsa/snapshots")
+CAPSA = "/usr/bin/capsa"
+FEDERATION = "/usr/bin/capsa-federation"
+SYSTEMCTL = "systemctl"
+EMBEDDING_READY_TIMEOUT = 300
+BACKEND_READY_TIMEOUT = 300
+
+
+def paths():
+    # CAPSA_CONFIG_DIR is a test seam only; installed commands always use /etc/capsa.
+    config_dir = Path(os.environ.get("CAPSA_CONFIG_DIR", CONFIG_DIR))
+    return config_dir, snapshot_root(config_dir), MODEL, TOKENIZER_ROOT, ASSET_MANIFEST
+
+
+def snapshot_root(config_dir):
+    path_file = config_dir / "paths.json"
+    if not path_file.exists() and not path_file.is_symlink():
+        return SNAPSHOT_ROOT
+    data = load_json(path_file)
+    if set(data) != {"snapshot_root"} or not isinstance(data["snapshot_root"], str):
+        fail("paths.json must contain only an absolute snapshot_root")
+    root = Path(data["snapshot_root"])
+    if not root.is_absolute():
+        fail("paths.json snapshot_root must be absolute")
+    for writable in (Path("/var/lib/capsa"), Path("/var/cache/capsa")):
+        try:
+            root.resolve(strict=False).relative_to(writable)
+        except ValueError:
+            continue
+        fail("paths.json snapshot_root cannot be inside a writable Capsa service area")
+    return root
+
+
+def fail(message):
+    raise RuntimeError(message)
+
+
+def require_root():
+    if os.geteuid() != 0:
+        fail("this operator command must run as root")
+
+
+def under(path, root):
+    try:
+        path.resolve(strict=True).relative_to(root.resolve(strict=True))
+    except (ValueError, FileNotFoundError):
+        fail(f"path is outside configured snapshot root {root}: {path}")
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def regular_readonly(path, label):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        fail(f"missing {label}: {path}")
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        fail(f"{label} must be a regular non-symlink file: {path}")
+    if info.st_mode & 0o022:
+        fail(f"{label} is writable by a group or other user: {path}")
+    return info
+
+
+def check_assets():
+    _, _, model, tokenizer_root, manifest_path = paths()
+    manifest = load_asset_manifest(manifest_path)
+    model_input = manifest["model"]
+    tokenizer_input = manifest["tokenizer"]
+    layout = tokenizer_input["hf_home_layout"]
+    if (model_input.get("sha256") != MODEL_SHA256 or model_input.get("bytes") != MODEL_BYTES
+            or tokenizer_input.get("sha256") != TOKENIZER_SHA256
+            or tokenizer_input.get("bytes") != TOKENIZER_BYTES
+            or tokenizer_input.get("revision") != TOKENIZER_REVISION):
+        fail("embedding asset manifest does not match the pinned Nomic profile")
+    model_info = regular_readonly(model, "embedding model")
+    if model_info.st_size != MODEL_BYTES or sha256(model) != MODEL_SHA256:
+        fail("embedding model checksum does not match the Nomic Q4_K_M profile")
+    blob = asset_layout_path(tokenizer_root, layout["blob"], "tokenizer blob")
+    snapshot = asset_layout_path(tokenizer_root, layout["snapshot"], "tokenizer snapshot")
+    ref = asset_layout_path(tokenizer_root, layout["ref_file"], "tokenizer ref")
+    if blob.name != TOKENIZER_BLOB or TOKENIZER_REPO not in blob.parts:
+        fail("tokenizer manifest does not describe the pinned Hugging Face cache blob")
+    regular_readonly(blob, "tokenizer cache blob")
+    if blob.stat().st_size != TOKENIZER_BYTES or sha256(blob) != TOKENIZER_SHA256:
+        fail("tokenizer cache blob checksum does not match the pinned revision")
+    if (not snapshot.is_symlink() or os.readlink(snapshot) != layout["snapshot_symlink_target"]
+            or snapshot.resolve(strict=True) != blob.resolve(strict=True)):
+        fail("tokenizer snapshot must link exactly to the verified cache blob")
+    if layout["ref_contents"] != TOKENIZER_REVISION or not ref.is_file() or ref.read_bytes() != TOKENIZER_REVISION.encode("ascii"):
+        fail("tokenizer refs/main must contain the pinned revision without a newline")
+    return {"model_bytes": model_info.st_size, "model_sha256": MODEL_SHA256,
+            "tokenizer_revision": TOKENIZER_REVISION}
+
+
+def load_asset_manifest(path):
+    regular_readonly(path, "embedding asset manifest")
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        model = manifest["model"]
+        tokenizer = manifest["tokenizer"]
+        layout = tokenizer["hf_home_layout"]
+    except (KeyError, OSError, TypeError, json.JSONDecodeError) as exc:
+        fail(f"invalid embedding asset manifest {path}: {exc}")
+    required_layout = {"blob", "snapshot", "snapshot_symlink_target", "ref_file", "ref_contents"}
+    if (not isinstance(model, dict) or not isinstance(tokenizer, dict) or not isinstance(layout, dict)
+            or not required_layout.issubset(layout)
+            or not all(isinstance(layout[key], str) for key in required_layout)):
+        fail("embedding asset manifest has an incomplete Hugging Face cache layout")
+    return manifest
+
+
+def asset_layout_path(root, value, label):
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts:
+        fail(f"{label} path in asset manifest must be relative to HF_HOME")
+    path = root / relative
+    try:
+        path.resolve(strict=True).relative_to(root.resolve(strict=True))
+    except (ValueError, FileNotFoundError):
+        fail(f"{label} path escapes HF_HOME")
+    return path
+
+
+def safe_config_file(path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        fail(f"configuration must be a regular file: {path}")
+    if info.st_uid != 0 or info.st_mode & 0o022:
+        fail(f"configuration must be root-owned and not group/other writable: {path}")
+
+
+def load_json(path):
+    safe_config_file(path)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        fail(f"invalid JSON configuration {path}: {exc}")
+
+
+def snapshot_stamp(path):
+    info = path.stat()
+    return {"size": info.st_size, "mtime_ns": info.st_mtime_ns,
+            "ctime_ns": info.st_ctime_ns, "ino": info.st_ino}
+
+
+def validate_snapshot_file(path, root):
+    if not path.is_absolute():
+        fail("snapshot database path must be absolute")
+    under(path, root)
+    expected_owner = 0
+    parent = path.resolve(strict=True).parent
+    root_resolved = root.resolve(strict=True)
+    while True:
+        parent_info = parent.stat()
+        if (not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != expected_owner
+                or parent_info.st_mode & 0o022):
+            fail(f"snapshot directory must be root-owned and not group/other writable: {parent}")
+        if parent == root_resolved:
+            break
+        parent = parent.parent
+    info = regular_readonly(path, "snapshot database")
+    if info.st_uid != expected_owner:
+        fail(f"snapshot database must be root-owned: {path}")
+    if info.st_size == 0:
+        fail("snapshot database is empty")
+    for suffix in ("-wal", "-shm", "-journal"):
+        if Path(str(path) + suffix).exists():
+            fail(f"snapshot has sidecar {suffix}; register only a completed checkpoint")
+    with path.open("rb") as database:
+        if database.read(16) != b"SQLite format 3\x00":
+            fail("snapshot does not have a SQLite/libSQL database header")
+    return snapshot_stamp(path)
+
+
+def validate_backend(name, config=None):
+    if name not in NAMES:
+        fail("snapshot name must be one of: " + ", ".join(NAMES))
+    config_dir, root, _, _, _ = paths()
+    if config is None:
+        config = load_json(config_dir / "backends" / f"{name}.json")
+    wanted = {"format", "name", "database", "bind", "generation", "sha256",
+              "immutable_ready", "checkpointed", "stamp", "embedding"}
+    if set(config) != wanted or config["format"] != 1 or config["name"] != name:
+        fail(f"backend configuration is incomplete or has unsupported keys: {name}")
+    if config["bind"] != f"127.0.0.1:{PORTS[name]}":
+        fail(f"backend {name} must use its fixed loopback port")
+    if config["immutable_ready"] is not True or config["checkpointed"] is not True:
+        fail(f"backend {name} was not explicitly declared checkpointed and immutable")
+    if config["embedding"] != {"model": "nomic-ai/nomic-embed-text-v1.5", "profile": "nomic-embed-text-v1.5.Q4_K_M"}:
+        fail(f"backend {name} does not use the pinned embedding profile")
+    db = Path(config["database"])
+    stamp = validate_snapshot_file(db, root)
+    if config["stamp"] != stamp:
+        fail(f"snapshot identity changed since registration: {name}")
+    actual = sha256(db)
+    if not re.fullmatch(r"[0-9a-f]{64}", config["sha256"]) or actual != config["sha256"]:
+        fail(f"snapshot checksum changed since registration: {name}")
+    if config["generation"] != "sha256:" + actual:
+        fail(f"snapshot generation is not derived from its checksum: {name}")
+    return config
+
+
+def validate_federation():
+    config_dir, _, _, _, _ = paths()
+    config = load_json(config_dir / "federation.json")
+    required_top = {"port", "per_source_timeout", "max_concurrency", "per_source_concurrency", "sources"}
+    if set(config) != required_top or config["port"] != 10084 or not isinstance(config["sources"], list):
+        fail("federation configuration is incomplete")
+    by_name = {item.get("name"): item for item in config["sources"] if isinstance(item, dict)}
+    if set(by_name) != set(NAMES) or len(config["sources"]) != len(NAMES):
+        fail("federation configuration must contain exactly the four managed sources")
+    for name in NAMES:
+        backend = validate_backend(name)
+        source = by_name[name]
+        if source != {"name": name, "endpoint": f"http://127.0.0.1:{PORTS[name]}/mcp",
+                      "generation": backend["generation"], "enabled": True, "immutable": True,
+                      "storage_status": "registered immutable checkpoint", "description": f"Capsa {name} snapshot"}:
+            fail(f"federation route is not the registered immutable backend: {name}")
+    return config
+
+
+def write_json(path, value):
+    path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".new")
+    payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        gid = grp.getgrnam("capsa").gr_gid
+        os.chown(temporary, 0, gid)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def register_snapshot(name, database, checkpointed):
+    require_root()
+    if not checkpointed:
+        fail("refusing registration without --checkpointed; this command never checkpoints or rewrites a database")
+    if name not in NAMES:
+        fail("snapshot name must be one of: " + ", ".join(NAMES))
+    config_dir, root, _, _, _ = paths()
+    check_assets()
+    db = Path(database)
+    stamp = validate_snapshot_file(db, root)
+    digest = sha256(db)
+    backend = {"format": 1, "name": name, "database": str(db.resolve()),
+               "bind": f"127.0.0.1:{PORTS[name]}", "generation": "sha256:" + digest,
+               "sha256": digest, "immutable_ready": True, "checkpointed": True,
+               "stamp": stamp,
+               "embedding": {"model": "nomic-ai/nomic-embed-text-v1.5",
+                             "profile": "nomic-embed-text-v1.5.Q4_K_M"}}
+    write_json(config_dir / "backends" / f"{name}.json", backend)
+    if all((config_dir / "backends" / f"{source}.json").exists() for source in NAMES):
+        backends = {source: validate_backend(source) for source in NAMES}
+        federation = {"port": 10084, "per_source_timeout": 10.0, "max_concurrency": 8,
+                      "per_source_concurrency": 2,
+                      "sources": [{"name": source, "endpoint": f"http://127.0.0.1:{PORTS[source]}/mcp",
+                                   "generation": backends[source]["generation"], "enabled": True,
+                                   "immutable": True, "storage_status": "registered immutable checkpoint",
+                                   "description": f"Capsa {source} snapshot"} for source in NAMES]}
+        write_json(config_dir / "federation.json", federation)
+    print(f"Registered {name}: sha256:{digest}")
+
+
+def mcp_call(port, method, params, headers=None, notification=False):
+    headers = dict(headers or {})
+    request = {"jsonrpc": "2.0", "method": method, "params": params}
+    if not notification:
+        request["id"] = 1
+    data = json.dumps(request).encode("utf-8")
+    headers.update({"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+    http_request = urllib.request.Request(f"http://127.0.0.1:{port}/mcp", data=data, headers=headers)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(http_request, timeout=3) as response:
+        session = response.headers.get("Mcp-Session-Id")
+        body = response.read().decode("utf-8")
+    if notification:
+        return {}, session
+    if body.lstrip().startswith("{"):
+        message = json.loads(body)
+    else:
+        data_lines = [line[5:].lstrip() for line in body.splitlines() if line.startswith("data:")]
+        message = json.loads("\n".join(data_lines))
+    if "error" in message:
+        fail(f"backend MCP returned an error for {method}")
+    return message.get("result", {}), session
+
+
+def wait_embeddings():
+    deadline = time.monotonic() + EMBEDDING_READY_TIMEOUT
+    request = urllib.request.Request("http://127.0.0.1:9001/health")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    while True:
+        try:
+            with opener.open(request, timeout=3) as response:
+                if response.status == 200:
+                    return
+                fail(f"embedding health endpoint returned HTTP {response.status}")
+        except Exception as exc:
+            if time.monotonic() >= deadline:
+                fail(f"embedding server did not become healthy: {exc}")
+            time.sleep(2)
+
+
+def wait_backend(name):
+    if name not in NAMES:
+        fail("unknown backend")
+    validate_backend(name)
+    deadline = time.monotonic() + BACKEND_READY_TIMEOUT
+    port = PORTS[name]
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2):
+                pass
+            _, session = mcp_call(port, "initialize", {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "capsa-readiness", "version": "1"}})
+            headers = {"Mcp-Session-Id": session} if session else {}
+            mcp_call(port, "notifications/initialized", {}, headers, notification=True)
+            tools, _ = mcp_call(port, "tools/list", {}, headers)
+            names = {entry.get("name") for entry in tools.get("tools", [])}
+            if names == {"search", "fetch_document"}:
+                return
+            fail("backend MCP did not expose only search/fetch_document")
+        except Exception as exc:
+            if time.monotonic() >= deadline:
+                fail(f"backend {name} did not become MCP-ready: {exc}")
+            time.sleep(2)
+
+
+def preflight_gateway():
+    config_dir, _, _, _, _ = paths()
+    check_assets()
+    validate_federation()
+    if (config_dir / "STOP_MANAGED_SERVERS").exists():
+        fail(f"managed startup is blocked by {config_dir}/STOP_MANAGED_SERVERS")
+    subprocess.run([FEDERATION, "--config", str(config_dir / "federation.json"), "--check-config"], check=True)
+
+
+def serve_snapshot(name):
+    backend = validate_backend(name)
+    os.execv(CAPSA, [CAPSA, "--base-url", "http://127.0.0.1:9001/v1", "--model", "nomic-ai/nomic-embed-text-v1.5", "--db-path", backend["database"], "serve", "--bind", backend["bind"], "--immutable"])
+
+
+def serve_gateway():
+    config_dir, _, _, _, _ = paths()
+    os.execv(FEDERATION, [FEDERATION, "--config", str(config_dir / "federation.json")])
+
+
+def systemctl(*args, check=True):
+    return subprocess.run([SYSTEMCTL, *args], check=check)
+
+
+def old_work_gone(units):
+    for unit in units:
+        if systemctl("is-active", "--quiet", unit, check=False).returncode == 0:
+            fail(f"backend is still active after stop: {unit}")
+        result = subprocess.run([SYSTEMCTL, "show", unit, "--property", "MainPID", "--value"], check=True, text=True, capture_output=True)
+        if result.stdout.strip() not in ("", "0"):
+            fail(f"backend still has a main process after stop: {unit}")
+
+
+def recover():
+    require_root()
+    units = [f"capsa-snapshot@{name}.service" for name in NAMES]
+    try:
+        systemctl("stop", "capsa-gateway.service")
+        systemctl("stop", *units)
+        old_work_gone(units)
+        systemctl("restart", *units)
+        for name in NAMES:
+            wait_backend(name)
+        systemctl("start", "capsa-gateway.service")
+    except BaseException:
+        systemctl("stop", "capsa-gateway.service", check=False)
+        raise
+    print("Managed backends restarted and MCP-ready before gateway admission resumed.")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    registration = commands.add_parser("register-snapshot")
+    registration.add_argument("name", choices=NAMES)
+    registration.add_argument("path")
+    registration.add_argument("--checkpointed", action="store_true", help="operator confirms a completed checkpoint; this helper never writes the database")
+    for command in ("preflight-assets", "preflight-gateway", "wait-embeddings", "recover"):
+        commands.add_parser(command)
+    commands.add_parser("serve-gateway")
+    for command in ("preflight-snapshot", "serve-snapshot", "wait-backend"):
+        item = commands.add_parser(command)
+        item.add_argument("name", choices=NAMES)
+    args = parser.parse_args()
+    try:
+        if args.command == "register-snapshot": register_snapshot(args.name, args.path, args.checkpointed)
+        elif args.command == "preflight-assets": check_assets()
+        elif args.command == "preflight-snapshot": check_assets(); validate_backend(args.name)
+        elif args.command == "serve-snapshot": serve_snapshot(args.name)
+        elif args.command == "serve-gateway": serve_gateway()
+        elif args.command == "wait-embeddings": wait_embeddings()
+        elif args.command == "wait-backend": wait_backend(args.name)
+        elif args.command == "preflight-gateway": preflight_gateway()
+        else: recover()
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"capsa service helper: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

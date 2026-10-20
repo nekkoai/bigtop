@@ -1,0 +1,97 @@
+#!/usr/bin/make -f
+
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+PRIVATE_LIBDIR = /usr/lib/capsa/llama
+PRIVATE_STAGE = $(CURDIR)/debian/capsa-llama-cpu$(PRIVATE_LIBDIR)
+
+ifeq ($(DEB_HOST_ARCH),amd64)
+else
+$(error capsa-llama-cpu is supported only on amd64)
+endif
+
+export CFLAGS = $(shell dpkg-buildflags --get CFLAGS) -march=x86-64 -mtune=generic
+export CXXFLAGS = $(shell dpkg-buildflags --get CXXFLAGS) -march=x86-64 -mtune=generic
+export LDFLAGS = $(shell dpkg-buildflags --get LDFLAGS)
+
+%:
+	dh $@ --buildsystem=none
+
+override_dh_auto_configure:
+	cmake -S . -B debian/build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_INSTALL_BINDIR=lib/capsa/llama \
+		-DCMAKE_INSTALL_LIBDIR=lib/capsa/llama \
+		-DCMAKE_INSTALL_INCLUDEDIR=lib/capsa/llama/include \
+		-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+		-DCMAKE_INSTALL_RPATH='$$ORIGIN' \
+		-DBUILD_SHARED_LIBS=ON \
+		-DLLAMA_BUILD_COMMIT="$$(cat debian/source-pin)" -DLLAMA_BUILD_NUMBER=0 \
+		-DLLAMA_BUILD_IS_DEV=OFF \
+		-DGGML_NATIVE=OFF -DGGML_OPENMP=ON -DGGML_CPU=ON \
+		-DGGML_OPENMP_FETCH=OFF -DGGML_CPU_ALL_VARIANTS=OFF \
+		-DGGML_SSE42=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF \
+		-DGGML_AVX_VNNI=OFF -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF \
+		-DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF \
+		-DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_BMI2=OFF \
+		-DGGML_BACKEND_DL=OFF -DGGML_BLAS=OFF -DGGML_CUDA=OFF \
+		-DGGML_HIP=OFF -DGGML_VULKAN=OFF -DGGML_METAL=OFF \
+		-DGGML_OPENCL=OFF -DGGML_SYCL=OFF -DGGML_RPC=OFF \
+		-DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+		-DLLAMA_BUILD_COMMON=ON -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON \
+		-DLLAMA_BUILD_APP=OFF -DLLAMA_BUILD_UI=OFF \
+		-DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_TOOLS_INSTALL=ON \
+		-DLLAMA_OPENSSL=OFF
+	@for option in \
+		BUILD_SHARED_LIBS:BOOL=ON LLAMA_BUILD_IS_DEV:BOOL=OFF \
+		LLAMA_BUILD_COMMON:BOOL=ON LLAMA_BUILD_TESTS:BOOL=OFF LLAMA_BUILD_EXAMPLES:BOOL=OFF \
+		LLAMA_BUILD_TOOLS:BOOL=ON LLAMA_BUILD_SERVER:BOOL=ON LLAMA_BUILD_APP:BOOL=OFF \
+		LLAMA_BUILD_UI:BOOL=OFF LLAMA_USE_PREBUILT_UI:BOOL=OFF \
+		LLAMA_TOOLS_INSTALL:BOOL=ON \
+		GGML_NATIVE:BOOL=OFF GGML_CPU:BOOL=ON GGML_OPENMP:BOOL=ON GGML_OPENMP_FETCH:BOOL=OFF \
+		GGML_CPU_ALL_VARIANTS:BOOL=OFF \
+		GGML_SSE42:BOOL=OFF GGML_AVX:BOOL=OFF GGML_AVX2:BOOL=OFF GGML_AVX_VNNI:BOOL=OFF \
+		GGML_AVX512:BOOL=OFF GGML_AVX512_VBMI:BOOL=OFF GGML_AVX512_VNNI:BOOL=OFF \
+		GGML_AVX512_BF16:BOOL=OFF GGML_FMA:BOOL=OFF GGML_F16C:BOOL=OFF GGML_BMI2:BOOL=OFF \
+		GGML_BACKEND_DL:BOOL=OFF GGML_BLAS:BOOL=OFF GGML_CUDA:BOOL=OFF \
+		GGML_HIP:BOOL=OFF GGML_VULKAN:BOOL=OFF GGML_METAL:BOOL=OFF \
+		GGML_OPENCL:BOOL=OFF GGML_SYCL:BOOL=OFF GGML_RPC:BOOL=OFF \
+		LLAMA_OPENSSL:BOOL=OFF; do \
+		grep -Fx "$$option" debian/build/CMakeCache.txt >/dev/null || \
+			{ echo "CMake did not accept requested option: $$option" >&2; exit 1; }; \
+	done
+
+override_dh_auto_build:
+	cmake --build debian/build --target llama-server --parallel 1
+
+override_dh_auto_test:
+	debian/build/bin/llama-server --help >/dev/null
+
+override_dh_auto_install:
+	install -D -m 0755 debian/build/bin/llama-server $(PRIVATE_STAGE)/llama-server
+	find debian/build -type f -name '*.so*' -exec install -m 0644 {} $(PRIVATE_STAGE)/ \;
+	find debian/build -type l -name '*.so*' -exec cp -a {} $(PRIVATE_STAGE)/ \;
+	test -n "$$(find $(PRIVATE_STAGE) -maxdepth 1 -name 'libllama.so*' -print -quit)"
+	test -n "$$(find $(PRIVATE_STAGE) -maxdepth 1 -name 'libggml.so*' -print -quit)"
+	test -n "$$(find $(PRIVATE_STAGE) -maxdepth 1 -name 'libggml-base.so*' -print -quit)"
+	test -n "$$(find $(PRIVATE_STAGE) -maxdepth 1 -name 'libggml-cpu.so*' -print -quit)"
+	install -d $(CURDIR)/debian/capsa-llama-cpu/usr/bin
+	printf '%s\n' '#!/bin/sh' \
+		'export LD_LIBRARY_PATH=/usr/lib/capsa/llama$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}' \
+		'exec /usr/lib/capsa/llama/llama-server "$$@"' \
+		> $(CURDIR)/debian/capsa-llama-cpu/usr/bin/capsa-llama-server
+	chmod 0755 $(CURDIR)/debian/capsa-llama-cpu/usr/bin/capsa-llama-server
+	install -d $(CURDIR)/debian/capsa-llama-cpu/usr/share/doc/capsa-llama-cpu/vendor
+	install -m 0644 LICENSE $(CURDIR)/debian/capsa-llama-cpu/usr/share/doc/capsa-llama-cpu/
+	install -m 0644 debian/source-pin $(CURDIR)/debian/capsa-llama-cpu/usr/share/doc/capsa-llama-cpu/
+	install -m 0644 licenses/LICENSE-jsonhpp vendor/cpp-httplib/LICENSE \
+		$(CURDIR)/debian/capsa-llama-cpu/usr/share/doc/capsa-llama-cpu/vendor/
+
+override_dh_shlibdeps:
+	dh_shlibdeps -l$(PRIVATE_STAGE) -- -xcapsa-llama-cpu
+
+override_dh_makeshlibs:
+	dh_makeshlibs --no-scripts
+
+override_dh_auto_clean:
+	rm -rf debian/build

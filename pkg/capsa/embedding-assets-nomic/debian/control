@@ -1,0 +1,17 @@
+Source: capsa-embedding-assets-nomic
+Section: data
+Priority: optional
+Maintainer: Roman <roman@nekko.ai>
+Build-Depends: debhelper-compat (= 13), python3
+Standards-Version: 4.6.2
+Homepage: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+Rules-Requires-Root: no
+
+Package: capsa-embedding-assets-nomic
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}
+Description: Nomic embedding GGUF and offline tokenizer cache for Capsa
+ This package contains the pinned Nomic Embed Text v1.5 Q4_K_M GGUF and the
+ exact Hugging Face cache layout used by Capsa's tokenizer.  Installation does
+ not download models or contact Hugging Face.

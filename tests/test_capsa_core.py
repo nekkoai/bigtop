@@ -148,19 +148,21 @@ touch ../capsa-core_fixture_amd64.deb ../capsa_fixture_amd64.buildinfo
 
 
 class CapsaCorePolicyTest(unittest.TestCase):
-    def test_core_has_generated_native_dependencies_and_no_install_hooks(self):
+    def test_source_packages_have_generated_core_dependencies_and_inert_services(self):
         debian = ROOT / "pkg/capsa/debian"
         control = (debian / "control").read_text()
-        self.assertEqual(control.count("\nPackage:"), 1)
+        self.assertEqual(control.count("\nPackage:"), 5)
         self.assertIn("Package: capsa-core", control)
         self.assertIn("Depends: ${shlibs:Depends}, ${misc:Depends}", control)
-        for suffix in ("postinst", "preinst", "prerm", "postrm"):
-            self.assertFalse(list(debian.glob(f"*.{suffix}")))
+        self.assertFalse((debian / "capsa-core.postinst").exists())
         rules = (debian / "rules").read_text()
         self.assertIn("--locked", rules)
         self.assertIn("--offline", rules)
         self.assertIn("target-cpu=x86-64", rules)
         self.assertNotIn("target-cpu=native", rules)
+        self.assertIn("dh_installsystemd --no-start --no-enable", rules)
+        server = control.split("Package: capsa-server\n", 1)[1]
+        self.assertNotIn("capsa-indexers", server.split("Suggests:", 1)[0])
 
 
 if __name__ == "__main__":

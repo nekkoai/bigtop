@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+if [ "$1" = configure ]; then
+    getent group capsa >/dev/null || addgroup --system capsa
+    getent passwd capsa >/dev/null || adduser --system --ingroup capsa \
+        --home /var/lib/capsa --no-create-home --shell /usr/sbin/nologin capsa
+    for path in /var/lib/capsa /var/cache/capsa; do
+        if [ ! -d "$path" ]; then install -d -m 0750 -o capsa -g capsa "$path"; fi
+    done
+    for path in /etc/capsa /etc/capsa/backends; do
+        if [ ! -d "$path" ]; then install -d -m 0750 -o root -g capsa "$path"; fi
+    done
+    if [ ! -d /srv/capsa/snapshots ]; then
+        install -d -m 0755 /srv/capsa/snapshots
+    fi
+fi
+#DEBHELPER#

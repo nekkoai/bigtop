@@ -1,4 +1,4 @@
-name: capsa-core
+name: capsa-packages
 
 on:
   push:
@@ -7,16 +7,18 @@ on:
       - '.github/workflows/capsa-core.yml'
       - '.gitmodules'
       - 'upstream/capsa'
+      - 'upstream/llama.cpp'
       - 'pkg/capsa/**'
-      - 'ci/build-capsa-core.sh'
+      - 'ci/*capsa*'
       - 'tests/**'
   pull_request:
     paths:
       - '.github/workflows/capsa-core.yml'
       - '.gitmodules'
       - 'upstream/capsa'
+      - 'upstream/llama.cpp'
       - 'pkg/capsa/**'
-      - 'ci/build-capsa-core.sh'
+      - 'ci/*capsa*'
       - 'tests/**'
   workflow_dispatch:
 
@@ -24,7 +26,7 @@ permissions:
   contents: read
 
 jobs:
-  core:
+  packages:
     runs-on: ubuntu-24.04
     env:
       CARGO_BUILD_JOBS: '2'
@@ -40,7 +42,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential debhelper devscripts fakeroot pkg-config cmake clang \
             libclang-dev libssl-dev liblzma-dev zlib1g-dev ca-certificates \
-            python3 zstd
+            python3 zstd ninja-build curl patchelf libcrypt1 libgdbm-compat4t64
 
       - name: Install the pinned build-only Rust toolchain
         run: |
@@ -51,23 +53,20 @@ jobs:
       - name: Packaging regression tests
         run: python3 -m unittest discover -s tests -v
 
-      - name: Build capsa-core
-        run: ci/build-capsa-core.sh
+      - name: Build all eight Capsa packages
+        run: ci/build-capsa.sh
 
-      # This runner is disposable. No service or model is installed by this slice.
-      - name: Install and check the native executable
-        run: |
-          sudo apt-get install -y "$PWD"/build/capsa-core/capsa-core_*.deb
-          capsa --version
-          capsa --help
-          dpkg-deb --field build/capsa-core/capsa-core_*.deb Depends
-          dpkg --audit
+      # Explicitly operates only on this disposable runner.
+      - name: Install and smoke-test the packages
+        run: sudo env CAPSA_DISPOSABLE_TEST_HOST=1 ci/smoke-test-capsa.sh build/capsa-dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: capsa-core-noble-amd64
+          name: capsa-noble-amd64
           path: |
-            build/capsa-core/*.deb
+            build/capsa-dist/*.deb
             build/capsa-core/*.buildinfo
             build/capsa-core/*.changes
+            build/capsa-llama/*.buildinfo
+            build/capsa-assets/*.buildinfo
           if-no-files-found: error

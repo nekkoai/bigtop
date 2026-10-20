@@ -1,235 +1,165 @@
-# Capsa packaging
+# Capsa packages
 
-Target: **Ubuntu 24.04, amd64**. The application source is pinned at
-`upstream/capsa`, from `nekkoai/capsa`; llama.cpp is a separate submodule from
-`aifoundry-org/llama.cpp`.
+Experimental **Ubuntu 24.04 amd64** packages for functional testing. They are
+built separately from the existing asys/dcomp release set; nothing is published
+to the apt repository by these build commands.
 
-## Implementation status
+## Package set
 
-This first slice provides the **`capsa-core` build recipe**, a pinned Rust
-toolchain, and a separate core-build CI job. It does not yet provide a deployable
-server stack. The other package names below describe the intended split, not
-empty packages or an installation interface that already works.
+| Package | Contents |
+|---|---|
+| `capsa-core` | Rust CLI/server, including its libSQL vector implementation |
+| `capsa-python-runtime` | Private CPython 3.12.15 and 29 hash-locked production dependencies; no pip, test tools or Tk |
+| `capsa-federation` | Read-only MCP gateway and private-runtime launcher |
+| `capsa-llama-cpu` | CPU/OpenMP llama-server and matching private libraries |
+| `capsa-embedding-assets-nomic` | Verified Nomic GGUF, tokenizer and exact HF cache layout |
+| `capsa-indexers` | Optional Jira/Confluence ingestion launchers; unsupported Drive reference source |
+| `capsa-services` | Inert-by-default units, snapshot registration and coordinated recovery |
+| `capsa-server` | Serving metapackage; does not depend on indexers |
 
-`ci/build-all.sh` and the existing release workflow still build/publish the
-asys/dcomp set. Capsa is deliberately not added to that release set until its
-runtime, asset and service acceptance gates are met.
+The primary `debian/` source recipe builds core, federation, indexers, services
+and server together. Companion recipes live in `python-runtime/`, `llama-cpu/`
+and `embedding-assets-nomic/`. All eight binary versions derive from
+`debian/changelog` so their exact-version dependencies remain coherent.
 
-### Source and compatibility pins
+## Pins and runtime profile
 
-- Capsa: `587d679984ba0973f7b5a2cd8228baf159928ad5`; its `Cargo.lock` is used
-  unchanged. The Git submodule pin is authoritative.
-- Rust: exact version in `rust-toolchain.toml`, not mutable `stable`. This is
-  a packaging build-toolchain choice, not a claim about the original deployment's
-  compiler.
-- llama.cpp: candidate `677e6ccf6261b86be2e99cd078d5275c8ee950f6`
-  (`et-b10239-677e6cc`) from the requested fork. The supplied deployment revision
-  `b10e773ea138f1fd6ef3e1bad93e4e4ca0924b00` could not be fetched from that fork
-  or resolved through the canonical repository's commit API. The supplied runtime
-  manifest identifies build 6875 at that revision and a retained source archive,
-  but does not include the archive or a downloadable archive URL.
+- Capsa: `587d679984ba0973f7b5a2cd8228baf159928ad5` at `upstream/capsa`.
+- Rust: exact toolchain in `rust-toolchain.toml`; unmodified upstream Cargo lock.
+- llama.cpp: upstream release **v0.7.0**, published October 15, 2026, commit
+  `620d2225cc436ab0b001e3200e590e3b286ef9ab`, fetched from the required
+  `aifoundry-org/llama.cpp` fork and pinned at `upstream/llama.cpp`.
+- CPython: python-build-standalone 3.12.15 / release `20261013`; archive and wheel
+  hashes are recorded under `python-runtime/`.
+- Model: `nomic-embed-text-v1.5.Q4_K_M.gguf`, 768 dimensions, revision
+  `18d1044f4866e224159fce8c6fc5c4f3920176e7`. Tokenizer revision:
+  `e9b6763023c676ca8431644204f50c2b100d9aab`. Exact URLs, sizes, hashes and cache
+  layout are in `embedding-assets-nomic/inputs.json`.
 
-**The candidate llama pin is not an approved replacement for existing indexes.**
-No llama package is built by the core recipe. Obtain the original source/pin or
-validate the candidate against the original embedding profile before enabling it.
-An equal output dimension alone is not evidence of embedding compatibility.
+The embedding unit uses loopback port 9001, 24 threads and batch/ubatch 4096,
+following the supplied launch record. CPU baseline builds disable native ISA
+optimizations and GPU backends. The old deployment used a different,
+*native-optimized* llama build (6875): these test packages intentionally use the
+new release, not a claim of numerical parity with existing indexes.
+Set `CAPSA_THREADS` in `/etc/capsa/embeddings.env` to adapt thread count to the
+test host; the smoke test uses two threads.
 
-## Intended package split
+## Build
 
-| Binary package | Contents | Recipe ownership |
-|---|---|---|
-| `capsa-core` | Rust executable, libSQL/vector functionality, native document parsers | `debian/` (initial recipe) |
-| `capsa-python-runtime` | Private, pinned interpreter and its runtime libraries | planned `python-runtime/debian/` |
-| `capsa-federation` | Gateway and isolated, hash-locked production Python dependencies | planned additions to `debian/` |
-| `capsa-llama-cpu` | Pinned CPU `llama-server` and matching private llama/ggml libraries | planned `llama-cpu/debian/` |
-| `capsa-embedding-assets-nomic` | Exact GGUF, tokenizer/cache layout, profile, checksums and notices | planned `embedding-assets-nomic/debian/` |
-| `capsa-indexers` | Jira/Confluence runners and helpers; collected Drive source with limitations | planned additions to `debian/` |
-| `capsa-services` | Units, configuration, readiness, snapshot registration and recovery tools | planned additions to `debian/` |
-| `capsa-server` | Serving metapackage; indexers optional | planned additions to `debian/` |
-
-The eventual interface is `apt install capsa-server capsa-indexers`. It is **not
-supported by this initial recipe**.
-
-## Building the core
-
-Use a disposable Ubuntu 24.04 amd64 builder, not a serving host. Install the
-native build dependencies listed in `debian/control`, Python 3 for the build
-driver, and the exact toolchain from `rust-toolchain.toml`.
+Use a disposable Noble amd64 builder, never a serving host. Allow several GiB
+for the compiler/vendor/build trees. Native prerequisites are listed in the
+recipes and `.github/workflows/capsa-core.yml`. Install the exact Rust toolchain
+from `rust-toolchain.toml` using rustup before building.
 
 ```sh
-git submodule update --init upstream/capsa
-ci/build-capsa-core.sh           # run from the bigtop repository root
-                               # -> build/capsa-core/*.deb
+ci/build-capsa.sh                 # all eight -> build/capsa-dist/*.deb
 ```
 
-The driver archives the recorded submodule revision and prepares vendored Cargo
-sources using the existing lockfile. Source preparation needs network access;
-the subsequent Cargo compilation is locked and offline. Compiler/toolchain
-installation is a builder responsibility, never a package-install operation.
+The driver runs `build-capsa-core.sh`, `build-capsa-runtime.sh`,
+`build-capsa-llama.sh` and `build-capsa-assets.sh`. Source pins are read from the
+Git index, so stage a deliberate submodule update before building.
 
-The recipe targets baseline x86-64, not `target-cpu=native`. Runtime native-library
-dependencies are generated by `dh_shlibdeps` from the built ELF, rather than
-hardcoding distribution-specific package names. Ordinary SQLite does not replace
-Capsa's compiled libSQL/vector support.
+Preparation downloads and verifies inputs; Cargo compilation is locked/offline
+and Python assembly uses hash-required, no-index inputs. Downloads are cached in
+`build/capsa-inputs/`. Package installation never fetches models, runs pip or
+resolves application dependencies. Ubuntu runtime-library dependencies come from
+actual ELF analysis, not assumptions about ordinary SQLite or a developer home.
 
-The package installs `/usr/bin/capsa` and documentation/license material. It has
-no service setup, model download, data migration, Python installation, ingestion
-or post-install database access. Basic executable checks are not a replacement
-for the full offline serving acceptance tests below.
+## Install and activate
 
-## Supplied runtime records
+```sh
+sudo apt install ./build/capsa-dist/*.deb
+```
 
-The operator's sanitized runtime-materials export supplies the previously missing
-asset identities, launch settings, interpreter/native input provenance and
-artifact-hashed wheel locks. These are **input records, not packaged artifacts,
-signatures, or a successful portable rebuild**. The export intentionally omits
-binaries, models, wheels and license payloads. Its `repository_commit`
-(`0bb0c03046a427bc7ab0876b5f77e838596700bc`) is not bound to a named repository
-in the export and is not either current source pin. Clarify that provenance;
-do not replace an application gitlink with it.
+This installs the optional indexers too. From a repository containing this set,
+the corresponding selection is `apt install capsa-server capsa-indexers`.
+Installation creates the dedicated `capsa` account and empty state/configuration
+directories, but **does not enable or start services, create databases or ingest**.
 
-The recorded embedding profile is Nomic v1.5 Q4_K_M, 768 dimensions, llama.cpp
-build 6875, CPU-only/OpenMP, loopback `127.0.0.1:9001`, 24 threads and batch/ubatch
-4096. The original build had `GGML_NATIVE=true`. Keep the historical 24-thread
-setting distinct from a configurable deployment default.
+Paths:
 
-| Input | Immutable revision | SHA-256 |
-|---|---|---|
-| `nomic-ai/nomic-embed-text-v1.5-GGUF` / `nomic-embed-text-v1.5.Q4_K_M.gguf` (84,106,624 bytes) | `18d1044f4866e224159fce8c6fc5c4f3920176e7` | `d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac` |
-| `nomic-ai/nomic-embed-text-v1.5` / `tokenizer.json` (711,396 bytes) | `e9b6763023c676ca8431644204f50c2b100d9aab` | `d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66` |
-| Retained `llama.cpp-b10e773ea138.tar.gz` (not supplied) | reported `b10e773ea138f1fd6ef3e1bad93e4e4ca0924b00` | `10f6f06b64e89428a3fbfe127f16cfed7ca496adb6252825ee3519964aee6712` |
+- `/usr/bin/capsa`, `capsa-federation`, `capsa-llama-server` and operator commands.
+- `/usr/lib/capsa/`: private interpreter, application code, helpers and llama libs.
+- `/usr/share/capsa/`: model/tokenizer assets and their manifest.
+- `/etc/capsa/`: operator configuration; `/var/lib/capsa/` and `/var/cache/capsa/`:
+  writable service state/cache.
+- `/srv/capsa/snapshots/`: default immutable database location, separate from
+  writable ingestion staging.
 
-The tokenizer manifest supplies the HF cache blob, snapshot symlink and `refs/main`
-contents. Capsa's 128-token preprocessing budget, prefix accounting and five-percent
-document overlap are separate from llama-server's context size. Pooling,
-normalization, server context size, parallel slots and GPU-layer defaults were
-not explicitly overridden in the recorded launch; do not invent numeric values
-or assume a different llama revision has equivalent defaults.
+Provision **already checkpointed** snapshots separately. Files and their snapshot
+parent directories must be root-owned and not group/other writable, with read
+access for `capsa`. Registration never checkpoints, rewrites or chowns a database.
+Do not copy a database away from a live writer or assume a missing destination WAL
+proves its source was checkpointed.
 
-Python records identify CPython 3.12.15 from python-build-standalone release
-`20261013`, exact native-package inputs, and 38 wheel artifacts (the original
-37-entry lock plus pip bootstrap). The original input lock matches the pinned
-federation lock byte-for-byte; full/runtime/test/bootstrap locks add artifact
-hashes without upgrading those versions. The native bundle's reported minimum is
-glibc 2.38; the recorded test host was Ubuntu 24.04 with glibc 2.39.
+```sh
+for source in drive slides confluence jira; do
+    sudo capsa-register-snapshot "$source" "/srv/capsa/snapshots/$source.db" --checkpointed
+done
+sudo capsa-managed-recover
+# Optional, only after successful configuration/testing:
+sudo systemctl enable capsa-gateway.service
+```
 
-The supplied dependency metadata resolves a 29-package application closure for
-CPython 3.12/Linux amd64 without a version conflict. The 32-entry runtime lock
-also includes pytest's `packaging` dependency and the build-only `setuptools` and
-`wheel`; the five-entry test delta relies on that placement. Separate those
-roles in packaging inputs without changing versions, and verify the downloaded
-wheels' own metadata before treating this record-level check as an installed
-runtime result.
+Registration records destination-local file identity and SHA-256 generations;
+it emits federation configuration after all four sources are registered. Native
+Capsa immutable startup validates the libSQL schema. No generic SQLite integrity
+check is substituted for libSQL vector support.
 
-## Remaining build-input and validation gates
+A root-owned `/etc/capsa/paths.json` may select another absolute `snapshot_root`;
+keep it outside writable service-state/cache directories. For remote mounts,
+also add an appropriate systemd `RequiresMountsFor=` dependency. Do not reuse
+host inode stamps or database generations from another machine.
 
-1. **Fetch and verify artifacts.** Obtain bytes from the recorded immutable URLs
-   and compare sizes/hashes before assembling packages. Recover the retained llama
-   archive for historical source/default comparison; it is not permission to
-   replace the required fork pin silently. Collect the actual model/tokenizer and
-   runtime license notices, not only SPDX labels or paths into an absent license
-   directory. A manifest's digest is not independent proof of origin.
-2. **Reconstruct the Python environment.** Use the artifact-hashed locks and
-   verify their production dependency closure in a clean target interpreter.
-   Assemble at the final private prefixes during package build, with no install-time
-   pip or dependency resolution. Do not copy a deployed venv: its paths are
-   absolute and its patched ELF hashes differ from original wheel `RECORD` entries.
-   Evaluate distro `libcrypt`/compiler-runtime dependencies from the packaged ELFs
-   rather than automatically reproducing the deployment's private native libraries.
-3. **Offline tokenizer loading.** Capsa calls
-   `Tokenizer::from_pretrained(model, None)`. The locked `tokenizers`/`hf-hub`
-   source uses `main`, checks the cache first and downloads on a cache miss.
-   Generate the exact supplied layout; `refs/main` must contain the revision
-   without an added newline. Do not treat `HF_HUB_OFFLINE=1` alone as a download
-   prohibition for this Rust code path. Require complete, verified read-only
-   assets, fail closed on missing assets, and test with outbound networking blocked.
-4. **Portable llama build and compatibility.** Use an explicit CPU baseline,
-   disable native/GPU optimizations, retain OpenMP support, and package the matching
-   executable/private libraries together. Do not install private llama/ggml
-   libraries into the system library namespace. CUDA is a separate future profile.
-   The original native-optimized binary hashes identify historical artifacts,
-   not expected rebuild outputs. Compare embeddings/retrieval against the recorded
-   runtime before attaching existing indexes; matching assets and dimensions alone
-   do not establish numerical compatibility.
+The service chain is embeddings, four immutable readers (10080–10083), then the
+loopback gateway (10084, `/mcp`). Asset/configuration checks and readiness checks
+fail closed. `/etc/capsa/STOP_MANAGED_SERVERS` blocks gateway admission.
 
-## Deployment contract for subsequent packages
+## Updates and recovery
 
-Use these paths without inheriting a developer account, home directory or UID:
+The gateway deliberately has `Restart=no`. Do not clear uncertain-work state by
+restarting only the gateway. `capsa-managed-recover` stops it and all four readers,
+checks that old backend processes are gone, restarts/readiness-checks the readers,
+and only then reopens gateway admission. Failure leaves the gateway stopped.
 
-| Path | Purpose |
-|---|---|
-| `/usr/bin/capsa` | Native CLI |
-| `/usr/lib/capsa/` | Private interpreter, application code, helpers and llama libraries |
-| `/usr/share/capsa/` | Model/tokenizer assets, profiles and shared resources |
-| `/etc/capsa/` | Operator-owned configuration |
-| `/var/lib/capsa/` | Application state; separate local ingestion staging |
-| `/var/cache/capsa/` | Disposable caches |
-| `/srv/capsa/snapshots/` | Configurable immutable database location |
+Runtime package preinst guards refuse upgrades while this stack is active:
 
-Create a dedicated `capsa` account without a fixed numeric UID. Serving processes
-must see published snapshots read-only; writers use separate local staging.
-Never package databases, source archives/documents, credentials, checkpoints,
-generated reports, host inode/device stamps, or one-off cutover scripts.
+```sh
+sudo systemctl stop capsa-gateway.service
+sudo systemctl stop capsa-snapshot@{drive,slides,confluence,jira}.service capsa-embeddings.service
+sudo apt install ./build/capsa-dist/*.deb
+sudo capsa-managed-recover
+```
 
-Snapshot registration must be an explicit operator action: verify the identity
-and checksum of a validated, checkpointed snapshot; generate destination-local
-configuration and filesystem checks; then test immutable startup, search and
-full-document fetch. A missing destination WAL cannot prove the source was
-checkpointed. Changed snapshots require appropriate generation rotation and
-embedding-profile validation. Application upgrades must not migrate or rewrite
-them.
+Stop any separately managed ingestion writers before changing their packages too.
+Use `apt install --reinstall` when testing a rebuilt set with unchanged versions.
+Configuration, snapshots and writable ingestion state are retained. Maintainer
+scripts do not migrate databases, disable unrelated services or remove data.
 
-The service dependency chain is embeddings, then four immutable readers, then
-the gateway. Bind to loopback, include readiness checks and systemd hardening,
-and fail closed when configuration, assets or snapshots are absent. Installation
-must not start ingestion, download assets, disable unrelated services, or assume
-the four snapshots already exist. Reboot activation follows explicit operator
-configuration/enablement, not package installation.
+## Indexers
 
-**Recovery is coordinated, not a gateway restart.** Preserve `Restart=no` for the
-gateway and its draining allowance. Stop/drain the gateway, establish that all
-old backend work has stopped, restart/check all four readers, then reopen gateway
-admission. Package upgrades affecting code or private runtimes must use that same
-safety boundary; an ordinary generated postinst must not restart only the gateway.
+`capsa-index-jira` and `capsa-index-confluence` use the private interpreter and
+require explicit archive/work/database/port arguments plus the upstream writable
+service acknowledgement. Packaging guards reject the default snapshot roots,
+registered snapshot directories and hardlink aliases. They do not start writers;
+use separate local ingestion staging, not published snapshots or the gateway.
 
-Adapt only reusable upstream mechanisms. Do not ship `federation/deploy/`
-wholesale: its units assume `/index/capsa/server` and `shelley`, and its startup
-and migration scripts include host-specific actions. Do not copy its real source
-generations into default configuration.
+The collected Drive adapter still expects a CLI contract that the pinned core
+does not reliably provide; it is reference material, not a supported entrypoint.
+The original Slides discovery/export wrapper remains absent. Native PPTX parsing
+is not that missing workflow. Historical scripts and corpus data are not shipped.
 
-## Optional indexers
+## Tests
 
-- Jira/Confluence use Python standard-library helpers and require explicit source
-  archive, work directory, database paths, port and writable-service acknowledgement.
-  Package entrypoints should use the private Capsa interpreter and never start a
-  writer against a published snapshot or the read-only gateway.
-  Their current protected-path guard covers `/index`; adapt and test it for the
-  new configurable snapshot root before shipping entrypoints.
-- Drive's collected adapter needs separately managed/authenticated `gws`.
-  It expects a legacy DOCID CLI response that the pinned Capsa CLI does not
-  provide. Retain it as clearly unsupported reference source until reconciled;
-  do not expose it as a working ingestion entrypoint. Its dry run still contacts
-  Google Workspace.
-- The original Slides discovery/export wrapper was not recovered. Native PPTX
-  parsing is not a replacement for that missing workflow.
-- Exclude historical launch scripts. The indexer README references a
-  `PROVENANCE.json` that is absent at this pin; do not claim to ship that manifest.
-- NFS-backed snapshots require host mount configuration and the target
-  distribution's NFS client support, separate from ingestion.
+```sh
+python3 -m unittest discover -s tests -v
+python3 pkg/capsa/python-runtime/tests/validate-inputs.py
+# Installs packages and explicitly starts test services: disposable host ONLY.
+sudo env CAPSA_DISPOSABLE_TEST_HOST=1 ci/smoke-test-capsa.sh build/capsa-dist
+```
 
-## Acceptance gates before a server release
-
-Use a clean target host with no developer-home caches and installation-time
-networking disabled. Test the application packages **and** the required
-distribution-package dependency closure, model/tokenizer packages and signed
-repository metadata. Snapshots remain a separate, optional transfer bundle.
-
-Cover embedding readiness/profile identity, four-source search and full fetch,
-loopback bindings and permissions, reboot, upgrade with state preservation,
-quarantined/uncertain work and coordinated recovery. Also test installation
-without snapshots: it must remain inert and must not attempt downloads or writes
-to published data.
-
-The upstream indexer fixture tests and federation mock tests are useful but do
-not establish those deployment guarantees. Report explicitly which tests ran;
-do not promote the staged package names to supported packages on their strength.
+Fixture tests do not compile native code. The smoke test is for real package and
+synthetic-data behavior, not proof that existing production indexes are compatible
+with the new llama release. Offline target dependency closure, broader upgrade/
+recovery coverage and production index compatibility remain further validation,
+not prerequisites to producing these experimental test packages.

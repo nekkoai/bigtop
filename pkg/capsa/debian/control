@@ -16,3 +16,32 @@ Description: embedding-based document storage and retrieval CLI
  OpenAI-compatible embedding service. This package contains only the capsa
  command-line program; it does not install a service, database, models, or
  embedding credentials.
+
+Package: capsa-federation
+Architecture: all
+Depends: capsa-python-runtime (= ${binary:Version}), ${misc:Depends}
+Description: read-only Capsa MCP federation gateway
+ Read-only multi-source gateway using Capsa's private Python runtime.
+
+Package: capsa-indexers
+Architecture: all
+Depends: capsa-core (= ${binary:Version}), capsa-python-runtime (= ${binary:Version}), ${misc:Depends}
+Description: optional explicit Capsa Jira and Confluence ingestion tools
+ Archive ingestion entrypoints. No ingestion is started automatically.
+ The legacy Drive adapter and missing Slides workflow are not supported entrypoints.
+
+Package: capsa-services
+Architecture: all
+Depends: capsa-core (= ${binary:Version}), capsa-federation (= ${binary:Version}),
+ capsa-llama-cpu (= ${binary:Version}), capsa-embedding-assets-nomic (= ${binary:Version}),
+ adduser, systemd, ${misc:Depends}
+Description: inert-by-default Capsa serving units and operator tools
+ Embeddings, four immutable readers and a read-only gateway. Snapshots must be
+ provisioned and registered explicitly. Installation starts no services.
+
+Package: capsa-server
+Architecture: all
+Depends: capsa-services (= ${binary:Version}), ${misc:Depends}
+Suggests: capsa-indexers (= ${binary:Version})
+Description: Capsa immutable serving stack
+ Metapackage for the complete serving stack; ingestion tools remain optional.

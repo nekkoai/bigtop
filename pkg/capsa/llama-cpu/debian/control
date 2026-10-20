@@ -1,0 +1,16 @@
+Source: capsa-llama-cpu
+Section: utils
+Priority: optional
+Maintainer: Roman <roman@nekko.ai>
+Build-Depends: debhelper-compat (= 13), build-essential, cmake, ninja-build, pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/aifoundry-org/llama.cpp
+Rules-Requires-Root: no
+
+Package: capsa-llama-cpu
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: private baseline CPU llama.cpp server for Capsa
+ This package contains the pinned llama-server and its matching shared
+ libraries for Capsa.  It enables the CPU/OpenMP backend only and does not
+ install CUDA libraries or model data.

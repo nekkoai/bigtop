@@ -1,0 +1,40 @@
+[Unit]
+Description=Capsa immutable snapshot reader (%i)
+Requires=capsa-embeddings.service
+After=network-online.target capsa-embeddings.service
+Wants=network-online.target
+RequiresMountsFor=/srv/capsa/snapshots
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=capsa
+Group=capsa
+UMask=0077
+Environment=HOME=/var/lib/capsa
+Environment=HF_HOME=/usr/share/capsa/tokenizers
+Environment=HF_HUB_OFFLINE=1
+Environment=RUST_LOG=warn
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper preflight-snapshot %i
+ExecStart=/usr/lib/capsa/python/bin/python3.12 -I -B /usr/lib/capsa/services/capsa-service-helper serve-snapshot %i
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadOnlyPaths=/etc/capsa /srv/capsa/snapshots /usr/share/capsa /usr/lib/capsa /usr/bin/capsa
+ReadWritePaths=/var/lib/capsa /var/cache/capsa
+
+[Install]
+WantedBy=multi-user.target

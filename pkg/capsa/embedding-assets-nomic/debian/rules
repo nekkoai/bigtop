@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+MODEL = nomic-embed-text-v1.5.Q4_K_M.gguf
+MODEL_SHA256 = d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac
+MODEL_BYTES = 84106624
+TOKENIZER = tokenizer.json
+TOKENIZER_SHA256 = d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66
+TOKENIZER_BYTES = 711396
+TOKENIZER_REVISION = e9b6763023c676ca8431644204f50c2b100d9aab
+TOKENIZER_BLOB = 688882a79f44442ddc1f60d70334a7ff5df0fb47
+HF_ROOT = /usr/share/capsa/tokenizers/hub/models--nomic-ai--nomic-embed-text-v1.5
+STAGE = $(CURDIR)/debian/capsa-embedding-assets-nomic
+
+%:
+	dh $@ --buildsystem=none
+
+override_dh_auto_build:
+	test "$$(wc -c < debian/assets/$(MODEL))" = "$(MODEL_BYTES)"
+	printf '%s  %s\n' $(MODEL_SHA256) debian/assets/$(MODEL) | sha256sum -c -
+	test "$$(wc -c < debian/assets/$(TOKENIZER))" = "$(TOKENIZER_BYTES)"
+	printf '%s  %s\n' $(TOKENIZER_SHA256) debian/assets/$(TOKENIZER) | sha256sum -c -
+
+override_dh_auto_install:
+	install -D -m 0644 debian/assets/$(MODEL) $(STAGE)/usr/share/capsa/models/$(MODEL)
+	install -D -m 0644 debian/assets/manifest.json $(STAGE)/usr/share/capsa/embedding-assets-nomic/manifest.json
+	install -D -m 0644 debian/assets/$(TOKENIZER) $(STAGE)/$(HF_ROOT)/blobs/$(TOKENIZER_BLOB)
+	install -d $(STAGE)/$(HF_ROOT)/snapshots/$(TOKENIZER_REVISION) $(STAGE)/$(HF_ROOT)/refs
+	ln -s ../../blobs/$(TOKENIZER_BLOB) $(STAGE)/$(HF_ROOT)/snapshots/$(TOKENIZER_REVISION)/$(TOKENIZER)
+	printf %s $(TOKENIZER_REVISION) > $(STAGE)/$(HF_ROOT)/refs/main
+	install -D -m 0644 debian/assets/MODEL-LICENSE.txt $(STAGE)/usr/share/doc/capsa-embedding-assets-nomic/MODEL-LICENSE.txt
+	install -m 0644 debian/assets/MODEL-LICENSE-NOTICE.txt $(STAGE)/usr/share/doc/capsa-embedding-assets-nomic/MODEL-LICENSE-NOTICE.txt

@@ -4,8 +4,8 @@ Ainekko's packaging and deployment repository. The first supported package
 set is [asys](https://github.com/glguida/asys) and
 [dcomp](https://github.com/glguida/dcomp) on Ubuntu 24.04 (noble, amd64),
 imported with history from `gh-ainekko/asys-debian`.
-[Capsa packaging](pkg/capsa/README.md) is being introduced separately, starting
-with a core build recipe; its complete serving stack is not yet packaged.
+[Capsa packaging](pkg/capsa/README.md) provides a separate experimental
+eight-package serving/indexing set for Ubuntu 24.04 amd64.
 
 Upstream sources are pinned as git submodules under `upstream/`; GitHub
 Actions builds, smoke-tests and (on `v*` tags) releases the `.deb`s.
@@ -19,10 +19,10 @@ Contributor and agent guidance: [AGENTS.md](AGENTS.md).
 | `asys-flow-view` | `ci/build-asys.sh` | X11 workflow viewer/editor |
 | `asys-server` | `ci/build-asys.sh` | shared team instance under `/srv/asys` (`asys init /srv/asys/host --group asys`, as upstream documents) |
 
-The table above is the current release set. Capsa's `capsa-core` recipe uses
-`ci/build-capsa-core.sh` and a separate CI job; it is not yet part of the asys/dcomp
-release workflow. See its README for the intended eight-package split and the
-remaining runtime, embedding-compatibility and service acceptance gates.
+The table above is the current published-release design. Build Capsa separately
+with `ci/build-capsa.sh` (output: `build/capsa-dist/`); its CI job installs and
+tests that set without adding it to the asys/dcomp publication workflow. See its
+README for package selection, explicit snapshot activation and testing caveats.
 
 ## Layout
 
@@ -32,10 +32,13 @@ pkg/
     debian/                   source packaging: asys, asys-server, asys-flow-view
     images/debian/            asys-images control template, hooks and loader
   dcomp/debian/                source packaging: dcomp
-  capsa/debian/                initial capsa-core recipe; see pkg/capsa/README.md
+  capsa/debian/                core, federation, indexers, services, server
+  capsa/python-runtime/        private CPython and locked production dependencies
+  capsa/llama-cpu/debian/      CPU server and matching private libraries
+  capsa/embedding-assets-nomic/debian/  model and tokenizer assets
 upstream/asys, upstream/dcomp  pinned upstream releases (submodules)
 upstream/capsa                 pinned combined Capsa source
-upstream/llama.cpp             candidate llama source; compatibility not validated
+upstream/llama.cpp             pinned llama release from the aifoundry fork
 keys/                         apt repository signing public key
 ci/                           shared build, test and publication scripts
 tests/                        lightweight packaging-path regression tests
@@ -237,8 +240,8 @@ to run `sudo asys-server-update --update` later or `asys-run --upgrade RUN`. Sha
 These are directions to evaluate, **not implemented features or release
 commitments**:
 
-1. **More projects and release conventions.** Complete the staged Capsa packages
-   under `pkg/capsa/` and their acceptance tests. Define how independently versioned
+1. **More projects and release conventions.** Expand Capsa integration/compatibility
+   coverage before publishing its experimental packages. Define how independently versioned
    projects participate in repository-wide releases before generalizing the
    current asys-oriented tag and cumulative-release scheme.
 2. **Reproducible, leaner artifacts.** Normalize build paths and timestamps,

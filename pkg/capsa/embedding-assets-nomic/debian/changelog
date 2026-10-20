@@ -1,0 +1,5 @@
+capsa-embedding-assets-nomic (0.1.0+git20261019.587d679-1) noble; urgency=medium
+
+  * Package verified Nomic v1.5 embedding model and offline tokenizer cache.
+
+ -- Roman <roman@nekko.ai>  Mon, 19 Oct 2026 23:55:00 +0000

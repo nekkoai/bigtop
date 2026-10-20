@@ -1,0 +1,17 @@
+#!/bin/sh
+# Do not change a live stack's executable, interpreter, model or configuration.
+set -eu
+if [ "${1:-}" = upgrade ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    for unit in capsa-gateway.service capsa-snapshot@drive.service capsa-snapshot@slides.service capsa-snapshot@confluence.service capsa-snapshot@jira.service capsa-embeddings.service; do
+        state=$(systemctl show "$unit" --property=ActiveState --value 2>/dev/null) ||
+            { echo "Cannot check $unit; refusing Capsa upgrade." >&2; exit 1; }
+        case "$state" in
+            inactive|failed|'') ;;
+            *)
+                echo "Stop/drain the Capsa gateway, all four readers and embeddings before upgrading ($unit is $state)." >&2
+                echo "After upgrading the complete package set, use capsa-managed-recover." >&2
+                exit 1
+                ;;
+        esac
+    done
+fi

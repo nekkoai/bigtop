@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: capsa-python-runtime
+Source: https://github.com/astral-sh/python-build-standalone
+
+Files: *
+Copyright: CPython contributors and respective Python distribution authors
+License: various
+ The CPython license and third-party notices available in the standalone
+ archive and installed wheels are installed under
+ /usr/share/doc/capsa-python-runtime/.
