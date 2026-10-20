@@ -1,72 +1,36 @@
-name: capsa-packages
+name: capsa-integration
 
+# Called only after all four independent Capsa build units have succeeded.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/capsa-core.yml'
-      - '.gitmodules'
-      - 'upstream/capsa'
-      - 'upstream/llama.cpp'
-      - 'pkg/capsa/**'
-      - 'ci/*capsa*'
-      - 'tests/**'
-  pull_request:
-    paths:
-      - '.github/workflows/capsa-core.yml'
-      - '.gitmodules'
-      - 'upstream/capsa'
-      - 'upstream/llama.cpp'
-      - 'pkg/capsa/**'
-      - 'ci/*capsa*'
-      - 'tests/**'
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  packages:
+  test:
     runs-on: ubuntu-24.04
-    env:
-      CARGO_BUILD_JOBS: '2'
-      DEB_BUILD_OPTIONS: parallel=2
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Native build and fixture-test dependencies
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-capsa-*
+          path: build/input
+
+      - name: Check all eight artifacts came from this commit and version
+        run: |
+          python3 ci/release-version.py --sha "$GITHUB_SHA" stamp
+          python3 ci/release-version.py --sha "$GITHUB_SHA" collect \
+            --input build/input --dist build/capsa-dist --require-build-records \
+            --units capsa-core capsa-runtime capsa-llama capsa-assets
+
+      # This is a fresh hosted VM, not a builder or a serving deployment.
+      - name: Real installation, synthetic data, recovery and upgrade checks
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            build-essential debhelper devscripts fakeroot pkg-config cmake clang \
-            libclang-dev libssl-dev liblzma-dev zlib1g-dev ca-certificates \
-            python3 zstd ninja-build curl patchelf libcrypt1 libgdbm-compat4t64
-
-      - name: Install the pinned build-only Rust toolchain
-        run: |
-          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pkg/capsa/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
-          rustup toolchain install "$version" --profile minimal --target x86_64-unknown-linux-gnu
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Packaging regression tests
-        run: python3 -m unittest discover -s tests -v
-
-      - name: Build all eight Capsa packages
-        run: ci/build-capsa.sh
-
-      # Explicitly operates only on this disposable runner.
-      - name: Install and smoke-test the packages
-        run: sudo env CAPSA_DISPOSABLE_TEST_HOST=1 ci/smoke-test-capsa.sh build/capsa-dist
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: capsa-noble-amd64
-          path: |
-            build/capsa-dist/*.deb
-            build/capsa-core/*.buildinfo
-            build/capsa-core/*.changes
-            build/capsa-llama/*.buildinfo
-            build/capsa-assets/*.buildinfo
-          if-no-files-found: error
+          sudo env CAPSA_DISPOSABLE_TEST_HOST=1 ci/smoke-test-capsa.sh build/capsa-dist

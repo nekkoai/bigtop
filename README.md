@@ -7,8 +7,9 @@ imported with history from `gh-ainekko/asys-debian`.
 [Capsa packaging](pkg/capsa/README.md) provides a separate experimental
 eight-package serving/indexing set for Ubuntu 24.04 amd64.
 
-Upstream sources are pinned as git submodules under `upstream/`; GitHub
-Actions builds, smoke-tests and (on `v*` tags) releases the `.deb`s.
+Upstream sources are pinned as git submodules under `upstream/`. Every push to
+`main` is automatically tagged, built and tested by GitHub Actions. Successful
+runs publish a complete signed apt repository as assets of that tag.
 Contributor and agent guidance: [AGENTS.md](AGENTS.md).
 
 | Package | Built by | Contents |
@@ -19,10 +20,11 @@ Contributor and agent guidance: [AGENTS.md](AGENTS.md).
 | `asys-flow-view` | `ci/build-asys.sh` | X11 workflow viewer/editor |
 | `asys-server` | `ci/build-asys.sh` | shared team instance under `/srv/asys` (`asys init /srv/asys/host --group asys`, as upstream documents) |
 
-The table above is the current published-release design. Build Capsa separately
-with `ci/build-capsa.sh` (output: `build/capsa-dist/`); its CI job installs and
-tests that set without adding it to the asys/dcomp publication workflow. See its
-README for package selection, explicit snapshot activation and testing caveats.
+Releases contain these five packages **and all eight Capsa packages** (13 total).
+Capsa remains experimental: its integration test uses synthetic data, not existing
+production indexes. Build it locally with `ci/build-capsa.sh` (output:
+`build/capsa-dist/`). See its README for package selection, explicit snapshot
+activation and compatibility caveats.
 
 ## Layout
 
@@ -42,7 +44,9 @@ upstream/llama.cpp             pinned llama release from the aifoundry fork
 keys/                         apt repository signing public key
 ci/                           shared build, test and publication scripts
 tests/                        lightweight packaging-path regression tests
-.github/workflows/build.yml   build -> smoke test -> apt metadata -> release on tag
+.github/workflows/build.yml   main-push tag -> parallel builds -> tests -> apt -> release
+.github/workflows/build-package.yml  reusable independent source-build job
+.github/workflows/capsa-core.yml     eight-package Capsa integration test
 ```
 
 `pkg/<project>/` groups packaging for one **software project**, not necessarily
@@ -73,8 +77,10 @@ packages or deployment framework are introduced in this first migration.
   copying application implementations into `pkg/`.
 - **Build related artifacts together.** The asys host packages and image bundle
   must use the same source revision, package version and upstream build ID
-  (`tools/build-id`). Use one `ci/build-all.sh` run for a release set; matching
-  version strings alone do not prove that separately built images match.
+  (`tools/build-id`). Locally, use one `ci/build-all.sh` run for that set.
+  Parallel CI builds use the same packaging commit and source pins, exchange
+  checksummed build records, and verify installed native host and target-engine
+  image build identities. Matching version strings alone are insufficient.
 - **Resolve image identity on the target engine.** The image bundle includes a
   build-host release record. `asys-images-load` loads the images and regenerates
   `/usr/share/asys/release.json` with their local Docker IDs; those IDs are not
@@ -98,14 +104,14 @@ and modify apt configuration; do not run them on a working deployment.
 ```sh
 git clone --recursive https://github.com/gh-ainekko/bigtop.git
 cd bigtop
-ci/build-all.sh                 # current asys/dcomp release set -> build/dist/*.deb
+ci/build-all.sh                 # local asys/dcomp set -> build/dist/*.deb
 ```
 
 Needs Go ≥ 1.25 on PATH, `debhelper`, `dh-python`, `devscripts`, `fakeroot`,
 `python3-pip`, `zstd`, the X11 dev packages from `pkg/asys/debian/control`, Docker
-with buildx. See `.github/workflows/build.yml` for the CI toolchain and dependency
-installation commands. The current scripts invoke `dpkg-buildpackage` and
-`dpkg-deb` directly; they do not provision an `sbuild` chroot.
+with buildx. See `.github/workflows/build-package.yml` for CI toolchains and
+dependency installation. The scripts invoke `dpkg-buildpackage` and `dpkg-deb`
+directly; they do not provision an `sbuild` chroot.
 
 Scripts default to the pinned submodules; pass another checkout and revision
 to build something else (`ci/build-asys.sh ~/asys HEAD`). Keep the image build
@@ -122,8 +128,10 @@ python3 -m unittest discover -s tests -v
 ```
 
 These use temporary fixture sources and stub the expensive build commands.
-They require `git`, `dpkg-dev`, `fakeroot`, `zstd` and Python 3, and do not
-replace the full build and installation smoke tests.
+They require `git`, `dpkg-dev`, `fakeroot`, `zstd` and Python 3.11+. Debhelper/make,
+`apt-utils`, GnuPG and `python3-yaml` enable additional vendor-cleanup, signed apt
+and workflow-graph tests. Signature tests use disposable keys; GitHub publication
+tests use an offline mock API. These do not replace full builds and smoke tests.
 
 After building, run the integration checks **only on a disposable test host**.
 It needs systemd, its own Docker daemon with buildx, and the test/publication
@@ -132,14 +140,16 @@ tools used by CI (`curl`, Python 3, `dpkg-dev`, `apt-utils`, GnuPG):
 ```sh
 sudo ci/smoke-test.sh build/dist
 ci/make-apt-repo.sh build/dist
-sudo ci/apt-repo-test.sh build/dist
+ci/apt-repo-test.sh build/dist
 ```
 
-The smoke test installs all five packages, checks the dashboard, runs the Hello
-workflow as a second user and exports skills. The apt test verifies signatures
-when signed metadata is present; otherwise it explicitly tests an unsigned
-repository. Use a disposable signing key for signature-path testing, not a
-production private key.
+The asys smoke test installs all five packages, checks the dashboard, runs the
+Hello workflow as a second user and exports skills. Capsa has its own separate
+eight-package VM test. The apt test verifies signatures when present; otherwise
+it explicitly tests an unsigned repository. It downloads every indexed package
+at its exact version and checks payload hashes, without installing packages or
+modifying system apt configuration. Use disposable signing keys for tests, not
+a production private key.
 
 For packaging changes, also test reinstall/upgrade behavior and preservation of
 existing run records and configuration. The server's update hook may activate
@@ -157,14 +167,89 @@ git -C upstream/asys  fetch --tags && git -C upstream/asys  checkout <release co
 dch -c pkg/dcomp/debian/changelog -v X.Y.Z-1 -D noble "New upstream release."
 dch -c pkg/asys/debian/changelog  -v A.B.C-1 -D noble "New upstream release."
 git add -A upstream pkg && git commit
-# After reviewing and validating the build:
-git tag vA.B.C-1
-git push origin HEAD
-git push origin vA.B.C-1
+# Review/merge to main, then push. Actions creates the release tag.
+git push origin main
 ```
 
 Versions must not contain `~` (GitHub rewrites it in asset names). Releases
-are cumulative per tag: each release carries all five binary packages.
+are cumulative per tag: each release carries all thirteen binary packages.
+
+## Automatic releases and parallel CI
+
+`.github/workflows/build.yml` runs on **every main push**, without path filters.
+Pull requests and manual dispatches run the same build/test graph but never tag,
+receive the signing secret or publish. Manually pushing a tag does not trigger
+another build. Publication happens in the main-push run itself; it does not rely
+on `GITHUB_TOKEN` tag pushes triggering a second workflow.
+
+The graph is:
+
+```
+identity -> tag (main pushes only)
+          -> seven independent build jobs
+             dcomp ───────┐
+             asys ────────┼-> asys integration ──┐
+             asys-images ─┘                      │
+             capsa-core ─────┐                   ├-> complete apt repository
+             capsa-runtime ──┤                   │   -> sign + apt download test
+             capsa-llama ────┼-> Capsa integration┘   -> draft assets -> publish
+             capsa-assets ──┘
+fixture/protocol tests ───────────────────────────┘
+```
+
+Each build job has its own disposable Ubuntu 24.04 runner/Docker daemon.
+Source builds that emit multiple binaries stay together: `asys` emits three
+packages and `capsa-core` emits five. The two integration jobs install artifacts
+on fresh runners, not on the builders. The final repository is gated by **every
+build, both integration tests and the regression suite**. Missing, duplicate,
+mixed-commit/pin, wrong-version/architecture or tampered artifacts fail assembly.
+The asys host/image build IDs must also agree; `asys-images-load` still
+regenerates Docker image IDs on the target engine.
+
+Repository tags follow Shelley's style:
+`v0.<full-history-commit-count>.9<octal-of-first-12-SHA-hex-digits>`.
+They name the packaging commit, not an upstream application version. A failed
+build leaves its tag but no published release. Existing tags are reused only
+when they point to exactly that commit; tags are never force-moved.
+
+To make `apt upgrade` notice packaging-only changes, CI appends
+`.bigtop.<count>.g<12-char-SHA>` to each primary **Debian revision** in its
+workspace. For example, `0.2.2-3` becomes `0.2.2-3.bigtop.123.g0123456789ab`.
+Companions inherit their family's exact version. No changelog edits, upstream
+version changes or pin changes are committed by CI. Keep `main` fast-forward
+and do not decrease package changelog versions: commit counts are not monotonic
+across force-pushes or history rewrites.
+
+The `apt-repo` Actions artifact is an unsigned preview, including on PRs.
+Only the main-push publication job imports `APT_GPG_PRIVATE_KEY`, verifies it
+against `keys/FINGERPRINT`, signs and tests the repository, and uploads the
+`apt-repo-signed` Actions artifact. **Missing or mismatched signing material
+fails publication; there is no unsigned-release fallback.**
+
+Every flat repository file is a separate GitHub Release asset: 13 `.deb`s,
+`Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg`, both public-key
+exports, `asys.sources`, `release.json` (source/package provenance) and
+`SHA256SUMS`. Generated source URLs use the actual `github.repository`.
+No private keys, build directories or databases are uploaded. GitHub's per-asset
+size limit is checked before publication.
+
+Assets first go to a draft. The publisher verifies the complete uploaded asset
+set, sizes and GitHub SHA-256 digests before publishing it. Retry a failed run
+using **Re-run failed jobs** (or all jobs if its 14-day artifacts have expired):
+incomplete drafts are repaired; published releases are immutable to this
+workflow. A retry verifies the published release's own checksums and provenance,
+rather than replacing it with timestamp-different rebuilt files.
+
+Publication is serialized with `concurrency.queue: max` (GitHub permits up to
+100 pending jobs), not a cancel-older-runs workflow group. A slower older build
+can publish its own tag without moving `latest` backwards. Known old `vX.Y.Z-N`
+apt tags can transition to automatic tags; unrelated manually selected latest
+tags are preserved. Queue overflow or manual cancellations require a rerun.
+
+The workflow uses GitHub's documented `queue: max` setting. Actionlint 1.7.12
+predates that key; locally validate the rest with
+`actionlint -ignore 'unexpected key "queue" for "concurrency" section'`.
+Workflow regression tests separately check queue and publication gates.
 
 ## Install from the apt repository
 
@@ -173,11 +258,12 @@ The release workflow publishes a flat apt repository at
 (signing key `keys/asys-archive-keyring.gpg`, fingerprint in `keys/FINGERPRINT`;
 CI signs with the `APT_GPG_PRIVATE_KEY` repository secret).
 
-**Before the first bigtop release:** configure the matching signing secret
-in this repository and validate a full CI build. The imported public key does
-not include the private key. Without it the existing scripts produce unsigned
-metadata, which the installation commands below will not trust. These URLs
-become usable only after a release is published.
+**Before the first automatic release:** configure `APT_GPG_PRIVATE_KEY` with the
+matching ASCII-armored private key, usable by batch GnuPG without interactive
+pinentry. Permit the workflow's `contents: write` jobs to create `v*` tags and
+releases (including repository ruleset exceptions). The tracked public key
+does not include private signing material. Validate the first GitHub run; these
+URLs become usable only after its release is published.
 
 This migration retains the existing `asys.sources`, `asys-archive-keyring.*`
 filenames and apt Origin/Label to avoid combining a layout refactor with a
@@ -189,11 +275,13 @@ bigtop release.
 sudo curl -fsSL https://github.com/gh-ainekko/bigtop/releases/latest/download/asys-archive-keyring.gpg -o /usr/share/keyrings/asys-archive-keyring.gpg
 sudo curl -fsSL https://github.com/gh-ainekko/bigtop/releases/latest/download/asys.sources -o /etc/apt/sources.list.d/asys.sources
 sudo apt update && sudo apt install asys-server
+# Or the experimental Capsa stack (inert until explicitly configured):
+sudo apt install capsa-server
 ```
 
 `apt upgrade` then follows new releases (`releases/latest` always points at
 the newest non-prerelease). Pin a specific release by replacing `latest/download`
-with `download/vX.Y.Z-N` in `asys.sources`.
+with `download/<automatic-tag>` in `asys.sources`.
 
 ## Team server
 
@@ -240,16 +328,16 @@ to run `sudo asys-server-update --update` later or `asys-run --upgrade RUN`. Sha
 These are directions to evaluate, **not implemented features or release
 commitments**:
 
-1. **More projects and release conventions.** Expand Capsa integration/compatibility
-   coverage before publishing its experimental packages. Define how independently versioned
-   projects participate in repository-wide releases before generalizing the
-   current asys-oriented tag and cumulative-release scheme.
+1. **More projects and compatibility coverage.** Extend the explicit build-unit,
+   package/version and repository-validation maps when adding projects. Expand
+   Capsa testing against real deployment/index histories beyond the synthetic
+   integration suite.
 2. **Reproducible, leaner artifacts.** Normalize build paths and timestamps,
    avoid copying host Python bytecode into images, and exclude unnecessary
    package-manager logs/caches and compile caches. Add repeat-build comparisons.
-3. **Isolated upgrade coverage.** Automate disposable build/install environments
-   and expand CI beyond the existing smoke test to state-preserving upgrades,
-   active-run handling, signed apt checks and minimal-image policies.
+3. **Isolated upgrade coverage.** Extend the existing Capsa reinstall/active-run
+   checks and signed apt tests to cross-version asys upgrades, reboot behavior
+   and minimal-image policies.
 4. **Image delivery and offline deployment.** Evaluate prebuilding the gateway
    and offering registry-based image distribution alongside bundled images.
    Preserve release/build identity and document the different network needs.

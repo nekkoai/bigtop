@@ -1,8 +1,9 @@
 # Capsa packages
 
 Experimental **Ubuntu 24.04 amd64** packages for functional testing. They are
-built separately from the existing asys/dcomp release set; nothing is published
-to the apt repository by these build commands.
+built by four independent CI jobs alongside asys/dcomp, then tested together.
+Successful main-push releases include all eight in the full signed apt repository.
+Local build commands do not publish anything.
 
 ## Package set
 

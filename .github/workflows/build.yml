@@ -3,75 +3,262 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
+# Every main push gets built, not canceled by the next push. Only remote
+# mutation is serialized, using GitHub's multi-run queue (up to 100 pending).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  packages:
+  identity:
     runs-on: ubuntu-24.04
-    env:
-      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Deterministic repository release identity
+        id: version
+        run: python3 ci/release-version.py --sha "$GITHUB_SHA" identity --github-output "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+  tag:
+    needs: identity
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-tag-${{ github.sha }}
+      queue: max
+    steps:
+      - uses: actions/checkout@v4
         with:
-          go-version: '1.25'
-          cache-dependency-path: |
-            upstream/dcomp/go.sum
-            upstream/asys/asys-inference/go.sum
+          persist-credentials: false
+      - name: Tag this push (idempotent, never force-move a tag)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.identity.outputs.tag }}
+        run: |
+          python3 ci/github-release.py tag \
+            --repository "$GITHUB_REPOSITORY" --tag "$TAG" --sha "$GITHUB_SHA"
 
-      - name: Build dependencies
+  checks:
+    needs: identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fixture and signed apt protocol tests (no production key)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends \
-            debhelper dh-python devscripts fakeroot python3-pip zstd apt-utils gnupg \
-            pkg-config libxaw7-dev libxmu-dev libxt-dev libxft-dev libxrender-dev libfontconfig-dev libx11-dev
+          sudo apt-get install -y -q --no-install-recommends debhelper fakeroot zstd apt-utils gnupg python3-yaml
+          python3 -m unittest discover -s tests -v
 
-      - name: Packaging regression tests
-        run: python3 -m unittest discover -s tests -v
+  dcomp:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: dcomp
 
-      - name: Build packages
-        run: ci/build-all.sh
+  asys:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: asys
 
-      - name: Smoke test (install + team workflow as a second user)
-        run: sudo ci/smoke-test.sh build/dist
+  asys-images:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: asys-images
 
-      - name: Import apt signing key
-        if: env.APT_GPG_PRIVATE_KEY != ''
-        run: printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+  capsa-core:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: capsa-core
 
-      - name: Generate apt repository metadata
-        run: ci/make-apt-repo.sh build/dist
+  capsa-runtime:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: capsa-runtime
 
-      - name: Verify the apt repository installs
-        run: sudo ci/apt-repo-test.sh build/dist
+  capsa-llama:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: capsa-llama
 
+  capsa-assets:
+    needs: [identity, tag]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
+    uses: ./.github/workflows/build-package.yml
+    with:
+      component: capsa-assets
+
+  asys-test:
+    needs: [dcomp, asys, asys-images]
+    # Explicit status prevents a skipped PR-only tag ancestor skipping tests.
+    if: ${{ !cancelled() && needs.dcomp.result == 'success' && needs.asys.result == 'success' && needs.asys-images.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-asys*
+          path: build/input
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-dcomp
+          path: build/input/build-dcomp
+      - name: Assemble matching source, versions and build IDs
+        run: |
+          python3 ci/release-version.py --sha "$GITHUB_SHA" stamp
+          python3 ci/release-version.py --sha "$GITHUB_SHA" collect \
+            --input build/input --dist build/dist --require-build-records \
+            --units dcomp asys asys-images
+      - name: Install, load images, dashboard and team workflow
+        run: |
+          sudo apt-get update -q
+          sudo ci/smoke-test.sh build/dist
+      - name: Verify installed native host and target-engine image build identity
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          expected = json.loads(Path("build/input/build-asys/asys.build.json").read_text())["asys_build"]
+          installed = json.loads(Path("/usr/share/asys/release.json").read_text())
+          assert installed["build"] == expected, "wrong target-engine release record"
+          output = subprocess.check_output(["asys-inference", "version"], text=True)
+          assert f"(build {expected};" in output, "host binary and bundled images differ"
+          PY
+
+  capsa-test:
+    needs: [capsa-core, capsa-runtime, capsa-llama, capsa-assets]
+    if: ${{ !cancelled() && needs.capsa-core.result == 'success' && needs.capsa-runtime.result == 'success' && needs.capsa-llama.result == 'success' && needs.capsa-assets.result == 'success' }}
+    uses: ./.github/workflows/capsa-core.yml
+
+  apt-repo:
+    needs: [identity, checks, asys-test, capsa-test]
+    if: ${{ !cancelled() && needs.identity.result == 'success' && needs.checks.result == 'success' && needs.asys-test.result == 'success' && needs.capsa-test.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: build/input
+      - name: Assemble the complete tested repository
+        env:
+          APT_REPOSITORY_URL: https://github.com/${{ github.repository }}/releases/latest/download
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends apt-utils gnupg
+          python3 ci/release-version.py --sha "$GITHUB_SHA" stamp
+          python3 ci/release-version.py --sha "$GITHUB_SHA" collect \
+            --input build/input --dist build/dist --require-build-records
+          ci/make-apt-repo.sh build/dist
+          python3 ci/release-version.py --sha "$GITHUB_SHA" manifest \
+            --dist build/dist --repository "$GITHUB_REPOSITORY"
+          python3 ci/validate-apt-repo.py build/dist
+      - name: Apt dependency resolution for both serving stacks
+        run: ci/apt-repo-test.sh build/dist
       - uses: actions/upload-artifact@v4
         with:
           name: apt-repo
           path: build/dist/*
           if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 14
 
-      # Every file in build/dist becomes a release asset, so
-      # https://github.com/OWNER/REPO/releases/latest/download/ is a flat apt repository.
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  publish:
+    needs: [identity, tag, apt-repo]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.identity.result == 'success' && needs.tag.result == 'success' && needs.apt-repo.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    # Multi-entry queue avoids canceling intervening successful pushes.
+    # Compare against current latest inside this serialized job.
+    concurrency:
+      group: apt-repository-publication
+      queue: max
+    env:
+      APT_REQUIRE_SIGNATURE: '1'
+      APT_REPOSITORY_URL: https://github.com/${{ github.repository }}/releases/latest/download
+    steps:
+      - uses: actions/checkout@v4
         with:
-          files: build/dist/*
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-          body: |
-            Flat apt repository (Ubuntu 24.04, amd64):
-            ```sh
-            sudo curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/asys-archive-keyring.gpg -o /usr/share/keyrings/asys-archive-keyring.gpg
-            sudo curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/asys.sources -o /etc/apt/sources.list.d/asys.sources
-            sudo apt update && sudo apt install asys-server
-            ```
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: apt-repo
+          path: build/dist
+      - name: Sign and verify the full repository
+        env:
+          GNUPGHOME: ${{ runner.temp }}/apt-signing
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          test -n "$APT_GPG_PRIVATE_KEY" || { echo 'APT_GPG_PRIVATE_KEY is required for publication' >&2; exit 1; }
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends apt-utils gnupg
+          install -d -m 0700 "$GNUPGHOME"
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          python3 ci/release-version.py --sha "$GITHUB_SHA" stamp
+          ci/make-apt-repo.sh build/dist
+          python3 ci/release-version.py --sha "$GITHUB_SHA" manifest \
+            --dist build/dist --repository "$GITHUB_REPOSITORY"
+          python3 ci/validate-apt-repo.py build/dist --require-signature
+      - name: Verify signed apt downloads for all thirteen packages
+        run: ci/apt-repo-test.sh build/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apt-repo-signed
+          path: build/dist/*
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 14
+      - name: Upload every asset to a draft, verify, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.identity.outputs.tag }}
+        run: |
+          python3 ci/github-release.py publish \
+            --repository "$GITHUB_REPOSITORY" --tag "$TAG" --sha "$GITHUB_SHA" --dist build/dist
+      - name: Remove temporary signing material
+        if: always()
+        env:
+          GNUPGHOME: ${{ runner.temp }}/apt-signing
+        run: |
+          gpgconf --kill gpg-agent || true
+          rm -rf -- "${RUNNER_TEMP:?}/apt-signing"
