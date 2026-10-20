@@ -265,11 +265,20 @@ releases (including repository ruleset exceptions). The tracked public key
 does not include private signing material. Validate the first GitHub run; these
 URLs become usable only after its release is published.
 
-This migration retains the existing `asys.sources`, `asys-archive-keyring.*`
-filenames and apt Origin/Label to avoid combining a layout refactor with a
-key or repository-identity migration. Existing `asys-debian` installations are
-not redirected automatically; switch their source only after validating a
-bigtop release.
+The filenames `asys.sources`, `asys-archive-keyring.*` and apt Origin/Label remain
+unchanged. Bigtop now uses a dedicated signing key, pinned in `keys/FINGERPRINT`,
+expiring **October 19, 2028 (UTC)**. Renew the key and public exports before expiration.
+The unencrypted private export belongs only in a secure backup and the
+`APT_GPG_PRIVATE_KEY` Actions secret, never in Git or release assets.
+
+**Existing-client trust migration:** the former key
+`0402161ECFDA24C6E9700FBB23676F951CAED622` cannot verify new-key releases.
+After validating the first new-key release, install its public key and switch
+the apt source together, using the commands below. Verify the downloaded key's
+fingerprint against the reviewed `keys/FINGERPRINT`. Do not replace the shared
+keyring while continuing to use an old-key `asys-debian` source; retain that
+source's old key under a separate keyring path if keeping both repositories.
+Neither trust nor source configuration is migrated automatically.
 
 ```sh
 sudo curl -fsSL https://github.com/gh-ainekko/bigtop/releases/latest/download/asys-archive-keyring.gpg -o /usr/share/keyrings/asys-archive-keyring.gpg
