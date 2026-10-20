@@ -234,6 +234,13 @@ class GitHubReleaseTests(unittest.TestCase):
         self.assertEqual(create[2]["make_latest"], "false")
         self.assertIn(f"github.com/{REPOSITORY}/releases/download/{TAG}", create[2]["body"])
         self.assertIn("experimental", create[2]["body"])
+        body = create[2]["body"]
+        base = f"https://github.com/{REPOSITORY}/releases/download/{TAG}"
+        self.assertIn(f"{base}/bigtop-archive-keyring.gpg -o /usr/share/keyrings/bigtop-archive-keyring.gpg", body)
+        self.assertIn(f"{base}/bigtop.sources -o /etc/apt/sources.list.d/bigtop.sources", body)
+        self.assertNotIn(f"{base}/asys", body)
+        self.assertTrue({"bigtop.sources", "bigtop-archive-keyring.gpg",
+                         "bigtop-archive-keyring.asc"} <= self.api.assets.keys())
         publish = self.api.calls[-1]
         self.assertEqual(publish[:2], ("PATCH", f"{BASE}/releases/1"))
         self.assertEqual(publish[2], {"draft": False, "make_latest": "true"})

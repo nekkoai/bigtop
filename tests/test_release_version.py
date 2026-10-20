@@ -560,7 +560,7 @@ class ReleaseVersionTests(unittest.TestCase):
         records = release.collect(self.root, source, dist, require_build_records=True)
         # Representative apt metadata and trust exports, generated as inert bytes.
         assets = ("Packages", "Packages.gz", "Release", "InRelease", "Release.gpg",
-                  "asys.sources", "asys-archive-keyring.gpg", "asys-archive-keyring.asc")
+                  "bigtop.sources", "bigtop-archive-keyring.gpg", "bigtop-archive-keyring.asc")
         for name in assets:
             (dist / name).write_bytes(f"fixture {name}\n".encode())
         (dist / "SHA256SUMS").write_text("obsolete manifest must be replaced\n")

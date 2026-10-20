@@ -36,7 +36,7 @@ PACKAGES = frozenset({
 })
 REQUIRED = frozenset({
     "Packages", "Packages.gz", "Release", "Release.gpg", "InRelease",
-    "asys-archive-keyring.gpg", "asys-archive-keyring.asc", "asys.sources",
+    "bigtop-archive-keyring.gpg", "bigtop-archive-keyring.asc", "bigtop.sources",
     "SHA256SUMS", "release.json",
 })
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -376,13 +376,14 @@ def notes(expected):
 
 Verify the archive signing-key fingerprint through a trusted channel first.
 ```sh
-sudo curl -fsSL {base}/asys-archive-keyring.gpg -o /usr/share/keyrings/asys-archive-keyring.gpg
-sudo curl -fsSL {base}/asys.sources -o /etc/apt/sources.list.d/asys.sources
+sudo curl -fsSL {base}/bigtop-archive-keyring.gpg -o /usr/share/keyrings/bigtop-archive-keyring.gpg
+sudo curl -fsSL {base}/bigtop.sources -o /etc/apt/sources.list.d/bigtop.sources
 sudo apt update
 sudo apt install asys-server
 ```
-The supplied asys.sources follows releases/latest; replace latest/download with
+The supplied bigtop.sources follows releases/latest; replace latest/download with
 download/{expected['tag']} in its URI to pin this release.
+
 Capsa packages are experimental and require explicit configuration/activation;
 they are not a production-ready serving or compatibility guarantee.
 SHA256SUMS and release.json record this release's complete asset provenance.

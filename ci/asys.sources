@@ -1,6 +1,0 @@
-# /etc/apt/sources.list.d/asys.sources
-# Keyring: https://github.com/gh-ainekko/bigtop/releases/latest/download/asys-archive-keyring.gpg
-Types: deb
-URIs: https://github.com/gh-ainekko/bigtop/releases/latest/download
-Suites: ./
-Signed-By: /usr/share/keyrings/asys-archive-keyring.gpg

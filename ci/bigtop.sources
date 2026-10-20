@@ -1,0 +1,6 @@
+# /etc/apt/sources.list.d/bigtop.sources
+# Keyring: https://github.com/nekkoai/bigtop/releases/latest/download/bigtop-archive-keyring.gpg
+Types: deb
+URIs: https://github.com/nekkoai/bigtop/releases/latest/download
+Suites: ./
+Signed-By: /usr/share/keyrings/bigtop-archive-keyring.gpg

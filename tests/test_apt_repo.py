@@ -69,7 +69,7 @@ class AptRepoTest(unittest.TestCase):
         keys.mkdir()
         (keys / "FINGERPRINT").write_text(fingerprint + "\n")
         for suffix, armor in (("gpg", []), ("asc", ["--armor"])):
-            with (keys / ("asys-archive-keyring." + suffix)).open("wb") as output:
+            with (keys / ("bigtop-archive-keyring." + suffix)).open("wb") as output:
                 subprocess.run(["gpg", "--batch", *armor, "--export", fingerprint], env=env,
                                stdout=output, stderr=subprocess.PIPE, check=True)
         return keys
@@ -126,8 +126,8 @@ class AptRepoTest(unittest.TestCase):
         for name in ("Release", "InRelease", "Release.gpg"):
             (self.dist / name).unlink(missing_ok=True)
         (self.dist / "Packages.gz").write_bytes(gzip.compress((self.dist / "Packages").read_bytes(), mtime=0))
-        result = execute("apt-ftparchive", "-o", "APT::FTPArchive::Release::Origin=asys",
-                         "-o", "APT::FTPArchive::Release::Label=asys",
+        result = execute("apt-ftparchive", "-o", "APT::FTPArchive::Release::Origin=bigtop",
+                         "-o", "APT::FTPArchive::Release::Label=bigtop",
                          "-o", "APT::FTPArchive::Release::Suite=stable",
                          "-o", "APT::FTPArchive::Release::Codename=noble",
                          "-o", "APT::FTPArchive::Release::Architectures=amd64 all", "release", ".", cwd=self.dist)
@@ -142,7 +142,28 @@ class AptRepoTest(unittest.TestCase):
         self.validator("--require-signature")
         self.assertEqual(len(list(self.dist.glob("*.deb"))), 13)
         self.assertNotIn(" Release\n", (self.dist / "Release").read_text())
-        self.assertEqual((ROOT / "ci/asys.sources").read_bytes(), (self.dist / "asys.sources").read_bytes())
+        self.assertEqual((ROOT / "ci/bigtop.sources").read_bytes(), (self.dist / "bigtop.sources").read_bytes())
+        source = (self.dist / "bigtop.sources").read_text()
+        base = "https://github.com/nekkoai/bigtop/releases/latest/download"
+        self.assertIn(f"URIs: {base}\n", source)
+        self.assertIn(f"# Keyring: {base}/bigtop-archive-keyring.gpg\n", source)
+        self.assertIn("Signed-By: /usr/share/keyrings/bigtop-archive-keyring.gpg\n", source)
+        metadata = VALIDATOR.one_paragraph((self.dist / "Release").read_text())
+        self.assertEqual(metadata["origin"], "bigtop")
+        self.assertEqual(metadata["label"], "bigtop")
+        self.assertIn("nekkoai/bigtop", metadata["description"])
+        for suffix in ("gpg", "asc"):
+            name = f"bigtop-archive-keyring.{suffix}"
+            self.assertEqual((self.dist / name).read_bytes(), (self.keys / name).read_bytes())
+
+    def test_incorrect_release_identity_is_rejected(self):
+        path = self.dist / "Release"
+        original = path.read_text()
+        for field in ("Origin", "Label"):
+            with self.subTest(field=field):
+                path.write_text(original.replace(f"{field}: bigtop\n", f"{field}: other\n"))
+                with self.assertRaisesRegex(ValueError, f"incorrect Release {field.lower()}"):
+                    VALIDATOR.validate_release(self.dist)
 
     def test_unsigned_local_default_and_stale_signature_cleanup(self):
         self.maker(self.dist, self.env)
@@ -174,7 +195,7 @@ class AptRepoTest(unittest.TestCase):
         shutil.copytree(self.keys, keys)
         for kind in ("missing", "wrong"):
             with self.subTest(kind=kind):
-                public = keys / "asys-archive-keyring.gpg"
+                public = keys / "bigtop-archive-keyring.gpg"
                 if kind == "missing":
                     public.unlink()
                 else:
@@ -203,20 +224,20 @@ class AptRepoTest(unittest.TestCase):
         keys = self.path / "keys"
         shutil.copytree(self.keys, keys)
         fingerprint = (keys / "FINGERPRINT").read_text().strip()
-        with (keys / "asys-archive-keyring.gpg").open("wb") as output:
+        with (keys / "bigtop-archive-keyring.gpg").open("wb") as output:
             subprocess.run(["gpg", "--batch", "--export-secret-keys", fingerprint], env=self.sign_env,
                            stdout=output, stderr=subprocess.PIPE, check=True)
         result = execute(str(ROOT / "ci/make-apt-repo.sh"), str(self.dist),
                          env=self.signed_env | {"APT_KEY_DIR": str(keys)}, check=False)
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual((self.dist / "asys-archive-keyring.gpg").read_bytes(),
-                         (self.keys / "asys-archive-keyring.gpg").read_bytes())
+        self.assertEqual((self.dist / "bigtop-archive-keyring.gpg").read_bytes(),
+                         (self.keys / "bigtop-archive-keyring.gpg").read_bytes())
 
     def test_url_override_and_injection_rejection(self):
         self.maker(self.dist, self.env | {"APT_REPOSITORY_URL": "https://github.com/example/repo/releases/latest/download/"})
-        source = (self.dist / "asys.sources").read_text()
+        source = (self.dist / "bigtop.sources").read_text()
         self.assertIn("URIs: https://github.com/example/repo/releases/latest/download\n", source)
-        self.assertIn("Signed-By: /usr/share/keyrings/asys-archive-keyring.gpg", source)
+        self.assertIn("Signed-By: /usr/share/keyrings/bigtop-archive-keyring.gpg", source)
         for bad in ("https://example.invalid/\nTrusted: yes", "https://example.invalid/a b", "file:///tmp/repo", "https://user:secret@example.invalid/"):
             with self.subTest(url=bad):
                 result = execute(str(ROOT / "ci/make-apt-repo.sh"), str(self.dist),
@@ -302,8 +323,8 @@ class AptRepoTest(unittest.TestCase):
         (self.dist / "Packages.gz").write_bytes(gzip.compress(b"wrong index"))
         # Refresh only Release, deliberately preserving the wrong gzip data.
         release.unlink()
-        output = execute("apt-ftparchive", "-o", "APT::FTPArchive::Release::Origin=asys",
-                         "-o", "APT::FTPArchive::Release::Label=asys", "-o", "APT::FTPArchive::Release::Suite=stable",
+        output = execute("apt-ftparchive", "-o", "APT::FTPArchive::Release::Origin=bigtop",
+                         "-o", "APT::FTPArchive::Release::Label=bigtop", "-o", "APT::FTPArchive::Release::Suite=stable",
                          "-o", "APT::FTPArchive::Release::Codename=noble", "-o",
                          "APT::FTPArchive::Release::Architectures=amd64 all", "release", ".", cwd=self.dist).stdout
         release.write_text(output)
@@ -336,7 +357,7 @@ class AptRepoTest(unittest.TestCase):
             VALIDATOR.validate_signatures(self.dist, self.keys, True)
 
     def test_public_key_tampering(self):
-        shutil.copyfile(self.other_keys / "asys-archive-keyring.gpg", self.dist / "asys-archive-keyring.gpg")
+        shutil.copyfile(self.other_keys / "bigtop-archive-keyring.gpg", self.dist / "bigtop-archive-keyring.gpg")
         self.validator("--require-signature", success=False)
 
     def test_private_stray_symlink_and_github_size_limit(self):
@@ -511,7 +532,7 @@ class AptRepoTest(unittest.TestCase):
             (apt / directory).mkdir(parents=True)
         (apt / "state/status").touch()
         source = apt / "etc/sources.list"
-        source.write_text(f"deb [signed-by={self.keys / 'asys-archive-keyring.gpg'}] {self.dist.as_uri()} ./\n")
+        source.write_text(f"deb [signed-by={self.keys / 'bigtop-archive-keyring.gpg'}] {self.dist.as_uri()} ./\n")
         config = apt / "apt.conf"
         config.write_text(f'''Dir "{apt}";
 Dir::State "{apt / 'state'}";

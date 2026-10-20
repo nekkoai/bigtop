@@ -133,7 +133,7 @@ def test_repository(dist, key_dir, require_signature=False, system_root=Path("/"
         config = apt_config(work, system_root)
         with repository_server(dist) as url:
             source = work / "etc/local.list"
-            trust = f"signed-by={key_dir / 'asys-archive-keyring.gpg'}" if signed else "trusted=yes"
+            trust = f"signed-by={key_dir / 'bigtop-archive-keyring.gpg'}" if signed else "trusted=yes"
             source.write_text(f"deb [{trust}] {url} ./\n")
             # Update only the test repository: host source indexes are seeded
             # copies and retained for resolution, never refreshed over the network.

@@ -1,9 +1,24 @@
 # bigtop
 
-Ainekko's packaging and deployment repository. The first supported package
-set is [asys](https://github.com/glguida/asys) and
-[dcomp](https://github.com/glguida/dcomp) on Ubuntu 24.04 (noble, amd64),
-imported with history from `gh-ainekko/asys-debian`.
+## TL;DR
+
+On Ubuntu 24.04 (amd64), configure the Bigtop apt repository:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nekkoai/bigtop/main/install.sh | bash -x
+```
+
+Requires `curl`, GnuPG and CA certificates, plus root or `sudo` access. The script
+verifies the pinned signing key, installs the apt source and refreshes package
+metadata. It does not install application packages. Then choose your packages,
+for example `sudo apt install asys-server` or `sudo apt install capsa-server`
+(Capsa requires explicit configuration; see below).
+
+## Overview
+
+Ainekko's packaging and deployment repository for Ubuntu 24.04 (noble, amd64).
+It packages [asys](https://github.com/glguida/asys) and
+[dcomp](https://github.com/glguida/dcomp).
 [Capsa packaging](pkg/capsa/README.md) provides a separate experimental
 eight-package serving/indexing set for Ubuntu 24.04 amd64.
 
@@ -68,7 +83,7 @@ Additional projects should follow this convention
 and be wired into the build/test pipeline explicitly. Non-package deployment
 recipes can live under `deploy/<product>/` when needed; install-time service
 units and hooks stay with the packages that ship them. No placeholder
-packages or deployment framework are introduced in this first migration.
+packages or deployment framework are provided.
 
 ## Packaging principles
 
@@ -102,7 +117,7 @@ package. Installation and apt tests additionally create users, start services
 and modify apt configuration; do not run them on a working deployment.
 
 ```sh
-git clone --recursive https://github.com/gh-ainekko/bigtop.git
+git clone --recursive https://github.com/nekkoai/bigtop.git
 cd bigtop
 ci/build-all.sh                 # local asys/dcomp set -> build/dist/*.deb
 ```
@@ -228,7 +243,7 @@ fails publication; there is no unsigned-release fallback.**
 
 Every flat repository file is a separate GitHub Release asset: 13 `.deb`s,
 `Packages`, `Packages.gz`, `Release`, `InRelease`, `Release.gpg`, both public-key
-exports, `asys.sources`, `release.json` (source/package provenance) and
+exports, `bigtop.sources`, `release.json` (source/package provenance) and
 `SHA256SUMS`. Generated source URLs use the actual `github.repository`.
 No private keys, build directories or databases are uploaded. GitHub's per-asset
 size limit is checked before publication.
@@ -253,9 +268,12 @@ Workflow regression tests separately check queue and publication gates.
 
 ## Install from the apt repository
 
+Use the [TL;DR installer](#tldr) above, or configure the repository manually
+with the commands below.
+
 The release workflow publishes a flat apt repository at
-`https://github.com/gh-ainekko/bigtop/releases/latest/download/`
-(signing key `keys/asys-archive-keyring.gpg`, fingerprint in `keys/FINGERPRINT`;
+`https://github.com/nekkoai/bigtop/releases/latest/download/`
+(signing key `keys/bigtop-archive-keyring.gpg`, fingerprint in `keys/FINGERPRINT`;
 CI signs with the `APT_GPG_PRIVATE_KEY` repository secret).
 
 **Before the first automatic release:** configure `APT_GPG_PRIVATE_KEY` with the
@@ -265,24 +283,20 @@ releases (including repository ruleset exceptions). The tracked public key
 does not include private signing material. Validate the first GitHub run; these
 URLs become usable only after its release is published.
 
-The filenames `asys.sources`, `asys-archive-keyring.*` and apt Origin/Label remain
-unchanged. Bigtop now uses a dedicated signing key, pinned in `keys/FINGERPRINT`,
-expiring **October 19, 2028 (UTC)**. Renew the key and public exports before expiration.
+The apt source is `bigtop.sources`, public-key exports are
+`bigtop-archive-keyring.*`, and apt Origin/Label are both `bigtop`.
+The signing key is pinned in `keys/FINGERPRINT` and expires
+**October 19, 2028 (UTC)**.
+Renew the key and public exports before expiration.
 The unencrypted private export belongs only in a secure backup and the
 `APT_GPG_PRIVATE_KEY` Actions secret, never in Git or release assets.
 
-**Existing-client trust migration:** the former key
-`0402161ECFDA24C6E9700FBB23676F951CAED622` cannot verify new-key releases.
-After validating the first new-key release, install its public key and switch
-the apt source together, using the commands below. Verify the downloaded key's
-fingerprint against the reviewed `keys/FINGERPRINT`. Do not replace the shared
-keyring while continuing to use an old-key `asys-debian` source; retain that
-source's old key under a separate keyring path if keeping both repositories.
-Neither trust nor source configuration is migrated automatically.
+Verify the downloaded public key's fingerprint against the reviewed
+`keys/FINGERPRINT` before using the repository.
 
 ```sh
-sudo curl -fsSL https://github.com/gh-ainekko/bigtop/releases/latest/download/asys-archive-keyring.gpg -o /usr/share/keyrings/asys-archive-keyring.gpg
-sudo curl -fsSL https://github.com/gh-ainekko/bigtop/releases/latest/download/asys.sources -o /etc/apt/sources.list.d/asys.sources
+sudo curl -fsSL https://github.com/nekkoai/bigtop/releases/latest/download/bigtop-archive-keyring.gpg -o /usr/share/keyrings/bigtop-archive-keyring.gpg
+sudo curl -fsSL https://github.com/nekkoai/bigtop/releases/latest/download/bigtop.sources -o /etc/apt/sources.list.d/bigtop.sources
 sudo apt update && sudo apt install asys-server
 # Or the experimental Capsa stack (inert until explicitly configured):
 sudo apt install capsa-server
@@ -290,7 +304,7 @@ sudo apt install capsa-server
 
 `apt upgrade` then follows new releases (`releases/latest` always points at
 the newest non-prerelease). Pin a specific release by replacing `latest/download`
-with `download/<automatic-tag>` in `asys.sources`.
+with `download/<automatic-tag>` in `bigtop.sources`.
 
 ## Team server
 

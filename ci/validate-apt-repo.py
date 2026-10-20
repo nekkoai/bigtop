@@ -26,7 +26,7 @@ EXPECTED_PACKAGES = {
 }
 METADATA = {
     "Packages", "Packages.gz", "Release", "Release.gpg", "InRelease",
-    "asys-archive-keyring.gpg", "asys-archive-keyring.asc", "asys.sources",
+    "bigtop-archive-keyring.gpg", "bigtop-archive-keyring.asc", "bigtop.sources",
     "release.json", "SHA256SUMS",
 }
 INDEX_FIELDS = {"filename", "size", "md5sum", "sha1", "sha256", "sha512"}
@@ -92,7 +92,7 @@ def validate_key_material(key_dir):
     with tempfile.TemporaryDirectory(prefix="bigtop-key-") as home:
         os.chmod(home, 0o700)
         for suffix in ("gpg", "asc"):
-            path = key_dir / f"asys-archive-keyring.{suffix}"
+            path = key_dir / f"bigtop-archive-keyring.{suffix}"
             require(path.is_file() and not path.is_symlink(), "missing/unsafe trusted public key")
             listing = run("gpg", "--batch", "--no-options", "--homedir", home,
                           "--with-colons", "--show-keys", str(path)).decode()
@@ -107,7 +107,7 @@ def validate_key_material(key_dir):
 def validate_signatures(dist, key_dir, required):
     fingerprint = validate_key_material(key_dir)
     for suffix in ("gpg", "asc"):
-        name = f"asys-archive-keyring.{suffix}"
+        name = f"bigtop-archive-keyring.{suffix}"
         require((dist / name).read_bytes() == (key_dir / name).read_bytes(),
                 f"published public key differs from trusted key: {name}")
     signed = [(dist / name).exists() for name in ("InRelease", "Release.gpg")]
@@ -119,7 +119,7 @@ def validate_signatures(dist, key_dir, required):
         home = Path(tmp)
         os.chmod(home, 0o700)
         keyring = home / "trusted.gpg"
-        keyring.write_bytes((key_dir / "asys-archive-keyring.gpg").read_bytes())
+        keyring.write_bytes((key_dir / "bigtop-archive-keyring.gpg").read_bytes())
         for name in ("InRelease", "Release.gpg"):
             args = ["gpgv", "--homedir", str(home), "--keyring", str(keyring), "--status-fd", "1"]
             if name == "InRelease":
@@ -135,7 +135,7 @@ def validate_signatures(dist, key_dir, required):
 
 def validate_release(dist):
     release = one_paragraph((dist / "Release").read_text())
-    for name, value in {"origin": "asys", "label": "asys", "suite": "stable", "codename": "noble"}.items():
+    for name, value in {"origin": "bigtop", "label": "bigtop", "suite": "stable", "codename": "noble"}.items():
         require(release.get(name) == value, f"incorrect Release {name}")
     require(set(release.get("architectures", "").split()) == {"amd64", "all"}, "incorrect Release architectures")
     for field, algorithm in (("md5sum", "md5"), ("sha1", "sha1"), ("sha256", "sha256"), ("sha512", "sha512")):
@@ -218,7 +218,7 @@ def validate(dist, key_dir, require_signature=False):
         require(path.name in METADATA or (flat_filename(path.name) and path.suffix == ".deb"),
                 f"unrecognized release asset: {path.name}")
         require(path.stat().st_size < MAX_ASSET_SIZE, f"release asset reaches GitHub 2 GiB limit: {path.name}")
-    for name in ("Packages", "Packages.gz", "Release", "asys.sources", "asys-archive-keyring.gpg", "asys-archive-keyring.asc"):
+    for name in ("Packages", "Packages.gz", "Release", "bigtop.sources", "bigtop-archive-keyring.gpg", "bigtop-archive-keyring.asc"):
         require((dist / name).is_file(), f"missing repository metadata: {name}")
     validate_packages(dist)
     validate_release(dist)
