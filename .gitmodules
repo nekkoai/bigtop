@@ -1,9 +1,9 @@
 [submodule "upstream/dcomp"]
 	path = upstream/dcomp
-	url = https://github.com/glguida/dcomp
+	url = https://github.com/nekkoai/dcomp
 [submodule "upstream/asys"]
 	path = upstream/asys
-	url = https://github.com/glguida/asys
+	url = https://github.com/nekkoai/asys
 [submodule "upstream/capsa"]
 	path = upstream/capsa
 	url = https://github.com/nekkoai/capsa.git
